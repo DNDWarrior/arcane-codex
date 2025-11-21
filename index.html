@@ -3,14 +3,11 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Arcane Codex v6.0 (Cloud Edition)</title>
+    <title>Arcane Codex v6.1 (Grand Unification)</title>
     <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     <script src="https://cdn.tailwindcss.com"></script>
-    
-    <script src="https://apis.google.com/js/api.js"></script>
-    <script src="https://accounts.google.com/gsi/client"></script>
     
     <script src="spells.js"></script>
     <script src="items.js"></script>
@@ -36,14 +33,29 @@
 
         @keyframes glowPulse { 0% { box-shadow: 0 0 5px #10b981; } 50% { box-shadow: 0 0 15px #10b981; } 100% { box-shadow: 0 0 5px #10b981; } }
         .active-cantrip { border-color: #10b981; animation: glowPulse 2s infinite; background-color: rgba(16, 185, 129, 0.05); }
+        
+        /* Ritual Active - Green */
         .ritual-active { border-color: #10b981; animation: glowPulse 3s infinite; background-color: rgba(16, 185, 129, 0.1); }
 
         details > summary { list-style: none; cursor: pointer; transition: color 0.2s; }
         details > summary::-webkit-details-marker { display: none; }
         details[open] > summary { margin-bottom: 10px; color: #38bdf8; }
         
-        @keyframes slideUp { from { transform: translateY(100%); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
-        .toast { animation: slideUp 0.3s ease-out; }
+        /* TOAST NOTIFICATION LIFECYCLE */
+        @keyframes toastLife {
+            0% { opacity: 0; transform: translate(-50%, 20px) scale(0.95); }
+            10% { opacity: 1; transform: translate(-50%, 0) scale(1); }
+            85% { opacity: 1; transform: translate(-50%, 0) scale(1); }
+            100% { opacity: 0; transform: translate(-50%, -20px) scale(0.95); }
+        }
+        .toast {
+            position: fixed;
+            top: 5rem;
+            left: 50%;
+            animation: toastLife 2s ease-in-out forwards;
+            z-index: 60;
+        }
+
         .modal-backdrop { background-color: rgba(0, 0, 0, 0.7); backdrop-filter: blur(2px); }
     </style>
 </head>
@@ -58,9 +70,10 @@
         // ==========================================
         const GOOGLE_CLIENT_ID = "967348609752-sh2jiisi0ak03u3k0ueiep91bvpmdk4t.apps.googleusercontent.com";
         const GOOGLE_API_KEY = "AIzaSyD3dli4UGV1AduHH2qsOWCCvFuC38Xi58g";
+        // ==========================================
+        
         const DISCOVERY_DOC = 'https://www.googleapis.com/discovery/v1/apis/drive/v3/rest';
         const SCOPES = 'https://www.googleapis.com/auth/drive.file';
-        // ==========================================
 
         // --- DATA MAPPER ---
         const normalizeSpell = (raw, index, forceType = null) => {
@@ -239,9 +252,8 @@
                 if (saved) setProfiles(JSON.parse(saved));
                 else setProfiles({ "char_1": { name: "Merlin", level: 1, spells: [], prepared: [], focusPoint: 1, gold: { gp: 15, sp: 0, cp: 0 }, inventory: [], maxSlots: WIZARD_TABLE[1] } });
                 
-                // INIT GOOGLE
-                if(GOOGLE_CLIENT_ID.includes("PASTE")) console.warn("Google Keys Missing");
-                else {
+                // INIT GOOGLE (Only if Keys are pasted)
+                if(!GOOGLE_CLIENT_ID.includes("PASTE")) {
                     const script1 = document.createElement('script');
                     script1.src = "https://apis.google.com/js/api.js";
                     script1.onload = () => gapi.load('client', initGapi);
@@ -272,42 +284,28 @@
             };
 
             const handleAuth = () => {
-                tokenClient.requestAccessToken({prompt: ''});
+                if(tokenClient) tokenClient.requestAccessToken({prompt: ''});
             };
 
             const syncToCloud = async () => {
                 if(!isSignedIn) { handleAuth(); return; }
                 notify("Syncing...", "neutral");
                 try {
-                    // 1. Find existing file
                     const query = "name = 'arcane_codex_cloud.json' and trashed = false";
                     const res = await gapi.client.drive.files.list({ q: query, fields: 'files(id)' });
                     const files = res.result.files;
-                    
                     const fileContent = JSON.stringify(profiles);
                     const fileMetadata = { 'name': 'arcane_codex_cloud.json', 'mimeType': 'application/json' };
 
                     if (files && files.length > 0) {
-                        // Update
                         const fileId = files[0].id;
-                        await gapi.client.request({
-                            path: `/upload/drive/v3/files/${fileId}`,
-                            method: 'PATCH',
-                            params: { uploadType: 'media' },
-                            body: fileContent
-                        });
+                        await gapi.client.request({ path: `/upload/drive/v3/files/${fileId}`, method: 'PATCH', params: { uploadType: 'media' }, body: fileContent });
                         notify("Cloud Save Complete!");
                     } else {
-                        // Create
                         const form = new FormData();
                         form.append('metadata', new Blob([JSON.stringify(fileMetadata)], { type: 'application/json' }));
                         form.append('file', new Blob([fileContent], { type: 'application/json' }));
-                        
-                        await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart', {
-                            method: 'POST',
-                            headers: new Headers({ 'Authorization': 'Bearer ' + gapi.client.getToken().access_token }),
-                            body: form
-                        });
+                        await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart', { method: 'POST', headers: new Headers({ 'Authorization': 'Bearer ' + gapi.client.getToken().access_token }), body: form });
                         notify("Cloud File Created!");
                     }
                 } catch (e) { showAlert("Cloud Error", e.message); }
@@ -320,7 +318,6 @@
                     const query = "name = 'arcane_codex_cloud.json' and trashed = false";
                     const res = await gapi.client.drive.files.list({ q: query, fields: 'files(id)' });
                     const files = res.result.files;
-                    
                     if (files && files.length > 0) {
                         const fileId = files[0].id;
                         const content = await gapi.client.drive.files.get({ fileId: fileId, alt: 'media' });
@@ -412,11 +409,12 @@
             // --- LOGIC ---
             const togglePrep = (spell) => {
                 const limit = cur.maxSlots[spell.level] || 99; 
-                // Strict Count: Exclude Focus/Ritual
+                // FIXED: Strict Count Excludes Focus/Ritual
                 const count = cur.prepared.filter(p => {
                     const s = dbSpells.find(x => x.id === p.spellId);
                     return s && s.level === spell.level && !s.traditions.includes("Focus") && !s.traditions.includes("Ritual");
                 }).length;
+                
                 const isSpecial = spell.traditions.includes("Ritual") || spell.traditions.includes("Focus");
 
                 if (isSpecial || count < limit) {
@@ -448,7 +446,6 @@
             };
 
             const toggleCast = (spell, pInst) => {
-                // FOCUS POINT LOGIC
                 if (spell.traditions.includes("Focus")) {
                     if (!pInst) { 
                         if (cur.focusPoint > 0) {
@@ -479,21 +476,18 @@
                     }
                 }
                 
-                // RITUAL LOGIC 
                 if (spell.traditions.includes("Ritual")) {
                      if (pInst) {
                          const newActive = !pInst.isActive;
                          performCast(spell, pInst, newActive, true);
                          notify(newActive ? "Ritual Active" : "Ritual Ended", "neutral");
                      } else {
-                         // First Perform: Create Entry as Active
                          updateProfile({ prepared: [...cur.prepared, { spellId: spell.id, uuid: Date.now(), used: false, isActive: true }] });
                          notify("Ritual Active", "neutral");
                      }
                      return;
                 }
 
-                // STANDARD LOGIC 
                 const newStatus = !pInst.used;
                 performCast(spell, pInst, newStatus, false);
             };
@@ -629,7 +623,16 @@
                          </div>
 
                          <h2 className="text-sky-400 font-bold mb-2 text-xs uppercase tracking-wider border-b border-slate-700 pb-1">My Spellbook</h2>
-                         {knownIds.length === 0 ? <div className="text-gray-600 text-xs italic p-2">Empty. Learn spells below.</div> : dbSpells.filter(s => knownIds.includes(s.id)).map(s => <SpellCard key={s.id} spell={s} actionLabel="Remove" actionType="remove" onAction={()=>updateProfile({spells: cur.spells.filter(id=>id!==s.id)})} />)}
+                         {knownIds.length === 0 ? <div className="text-gray-600 text-xs italic p-2">Empty. Learn spells below.</div> : dbSpells.filter(s => knownIds.includes(s.id)).map(s => {
+                             // FIXED: Strict Count check for buttons here too
+                             const count = cur.prepared.filter(p => {
+                                 const x = dbSpells.find(ref => ref.id === p.spellId);
+                                 return x && x.level === s.level && !x.traditions.includes("Focus") && !x.traditions.includes("Ritual");
+                             }).length;
+                             const full = count >= (cur.maxSlots[s.level]||0);
+                             const isSpecial = s.traditions.includes("Ritual") || s.traditions.includes("Focus");
+                             return <SpellCard key={s.id} spell={s} actionLabel={(!isSpecial && full) ? "Slots Full" : "Prepare"} disabled={!isSpecial && full} actionType="prepare" onAction={() => togglePrep(s)} />;
+                         })}
                          
                          <div className="mt-8 border-b border-slate-700 pb-1 flex justify-between items-end mb-2"><h2 className="text-emerald-400 font-bold text-xs uppercase tracking-wider">The Archives</h2></div>
                          <input type="text" value={archiveSearch} onChange={e=>setArchiveSearch(e.target.value)} placeholder="Search Archive..." className="w-full bg-slate-900 text-white p-2 rounded border border-slate-700 text-sm mb-4 focus:outline-none focus:border-emerald-500" />
@@ -679,6 +682,7 @@
                         </div>
                     </div>
 
+                    {/* CLOUD SYNC */}
                     <div className="bg-slate-800 p-3 rounded-lg border border-slate-700 mb-4">
                         <h2 className="text-white font-bold mb-2 text-xs uppercase tracking-wide text-sky-400">Cloud Sync (Google Drive)</h2>
                         {isSignedIn ? (
@@ -695,8 +699,8 @@
                     </div>
 
                     <div className="grid grid-cols-2 gap-3">
-                        <button onClick={handleExport} className="bg-slate-700 border border-slate-600 p-3 rounded flex flex-col items-center hover:bg-slate-600 transition"><span className="text-xl mb-1">💾</span><span className="text-xs font-bold text-slate-300">Backup File</span></button>
-                        <button onClick={handleImport} className="bg-slate-700 border border-slate-600 p-3 rounded flex flex-col items-center hover:bg-slate-600 transition"><span className="text-xl mb-1">📂</span><span className="text-xs font-bold text-slate-300">Restore File</span></button>
+                        <button onClick={handleExport} className="bg-slate-700 border border-slate-600 p-3 rounded flex flex-col items-center hover:bg-slate-600 transition"><span className="text-xl mb-1">💾</span><span className="text-xs font-bold text-slate-300">Backup Data</span></button>
+                        <button onClick={handleImport} className="bg-slate-700 border border-slate-600 p-3 rounded flex flex-col items-center hover:bg-slate-600 transition"><span className="text-xl mb-1">📂</span><span className="text-xs font-bold text-slate-300">Restore Data</span></button>
                     </div>
                     <p className="text-center text-[10px] text-slate-600 mt-4">Data is saved automatically to this browser.</p>
                 </div>
@@ -710,13 +714,14 @@
                         {view === 'spellbook' && (
                             <div>
                                 {renderDailyPrep()}
-                                <h2 className="text-slate-500 font-bold mb-2 text-xs uppercase tracking-widest mt-6">Known Spells (Slots)</h2>
+                                <h2 className="text-slate-500 font-bold mb-2 text-xs uppercase tracking-widest mt-6">Known Spells</h2>
                                 {dbSpells.filter(s => cur.spells.includes(s.id) && !s.traditions.includes('Focus') && !s.traditions.includes('Ritual')).map(s => {
                                     const count = cur.prepared.filter(p => {
                                         const x = dbSpells.find(ref => ref.id === p.spellId);
                                         return x && x.level === s.level && !x.traditions.includes("Focus") && !x.traditions.includes("Ritual");
                                     }).length;
                                     const full = count >= (cur.maxSlots[s.level]||0);
+                                    
                                     // Filter logic: Only show slot spells here
                                     const isSpecial = s.traditions.includes("Ritual") || s.traditions.includes("Focus");
                                     if(isSpecial) return null; // Safety filter
