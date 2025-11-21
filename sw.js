@@ -1,32 +1,38 @@
-const CACHE_NAME = 'arcane-codex-v2'; // Changed version to force update
+const CACHE_NAME = 'arcane-codex-v3'; // New version
 const ASSETS = [
   './',
   './index.html',
   './spells.js',
   './items.js',
   './manifest.json',
-  // EXTERNAL LIBRARIES (The Engine)
+  // The Engine (External Libraries)
   'https://unpkg.com/react@18/umd/react.development.js',
   'https://unpkg.com/react-dom@18/umd/react-dom.development.js',
   'https://unpkg.com/@babel/standalone/babel.min.js',
   'https://cdn.tailwindcss.com'
 ];
 
-// Install: Cache everything
+// 1. INSTALL: Cache EVERYTHING immediately
 self.addEventListener('install', (e) => {
+  self.skipWaiting(); // Force new worker to take over
   e.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => cache.addAll(ASSETS))
+    caches.open(CACHE_NAME).then((cache) => {
+      console.log('Service Worker: Caching Files');
+      return cache.addAll(ASSETS);
+    })
   );
-  self.skipWaiting(); // Force activation
 });
 
-// Activate: Clean up old caches
+// 2. ACTIVATE: Clean up old versions
 self.addEventListener('activate', (e) => {
   e.waitUntil(
     caches.keys().then((keys) => {
       return Promise.all(
         keys.map((key) => {
-          if (key !== CACHE_NAME) return caches.delete(key);
+          if (key !== CACHE_NAME) {
+            console.log('Service Worker: Clearing Old Cache');
+            return caches.delete(key);
+          }
         })
       );
     })
@@ -34,15 +40,21 @@ self.addEventListener('activate', (e) => {
   self.clients.claim();
 });
 
-// Fetch: Network First, Fallback to Cache (Better for dynamic data)
+// 3. FETCH: Cache First Strategy (Offline Priority)
 self.addEventListener('fetch', (e) => {
-  // Skip Google API requests (they require online)
+  // Ignore Google API calls (they require internet)
   if (e.request.url.includes('googleapis') || e.request.url.includes('accounts.google')) {
-    return; 
+    return;
   }
 
   e.respondWith(
-    fetch(e.request)
-      .catch(() => caches.match(e.request))
+    caches.match(e.request).then((cachedResponse) => {
+      // A. If found in cache, return it immediately (OFFLINE WORKS)
+      if (cachedResponse) {
+        return cachedResponse;
+      }
+      // B. If not in cache, try to fetch from network
+      return fetch(e.request);
+    })
   );
 });
