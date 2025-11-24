@@ -1,6 +1,17 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
+
+<!-- Google tag (gtag.js) -->
+<script async src="https://www.googletagmanager.com/gtag/js?id=G-QCNBYXR1EP"></script>
+<script>
+  window.dataLayer = window.dataLayer || [];
+  function gtag(){dataLayer.push(arguments);}
+  gtag('js', new Date());
+
+  gtag('config', 'G-QCNBYXR1EP');
+</script>
+    
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Arcane Codex v5.7 (Ritual Fix)</title>
@@ -67,8 +78,8 @@
         // ==========================================
         // 🔑 PASTE YOUR GOOGLE KEYS HERE
         // ==========================================
-        const GOOGLE_CLIENT_ID = "PASTE_YOUR_CLIENT_ID_HERE";
-        const GOOGLE_API_KEY = "PASTE_YOUR_API_KEY_HERE";
+        const GOOGLE_CLIENT_ID = "967348609752-sh2jiisi0ak03u3k0ueiep91bvpmdk4t.apps.googleusercontent.com";
+        const GOOGLE_API_KEY = "AIzaSyC8vWwxKK-kwgymt1xogvF38agxy99ATR8";
         // ==========================================
         
         const DISCOVERY_DOC = 'https://www.googleapis.com/discovery/v1/apis/drive/v3/rest';
@@ -784,5 +795,15 @@
         const root = ReactDOM.createRoot(document.getElementById('root'));
         root.render(<App />);
     </script>
-</body>
+
+    <script src='https://storage.ko-fi.com/cdn/scripts/overlay-widget.js'></script>
+    <script>
+      kofiWidgetOverlay.draw('maccadies', {
+        'type': 'floating-chat',
+        'floating-chat.donateButton.text': 'Support me',
+        'floating-chat.donateButton.background-color': '#794bc4',
+        'floating-chat.donateButton.text-color': '#fff'
+      });
+    </script>
+    </body>
 </html>
