@@ -13,7 +13,7 @@
     
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Arcane Codex v5.7 (Ritual Fix)</title>
+    <title>Arcane Codex v6.2 (Refined)</title>
     
     <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
@@ -63,7 +63,8 @@
         details[open] > summary { margin-bottom: 10px; color: #38bdf8; }
         
         @keyframes slideUp { from { transform: translateY(100%); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
-        .toast { animation: slideUp 0.3s ease-out; }
+        .toast { position: fixed; top: 5rem; left: 50%; animation: toastLife 2s ease-in-out forwards; z-index: 60; }
+        @keyframes toastLife { 0% { opacity: 0; transform: translate(-50%, 20px) scale(0.95); } 10% { opacity: 1; transform: translate(-50%, 0) scale(1); } 85% { opacity: 1; transform: translate(-50%, 0) scale(1); } 100% { opacity: 0; transform: translate(-50%, -20px) scale(0.95); } }
 
         .modal-backdrop { background-color: rgba(0, 0, 0, 0.7); backdrop-filter: blur(2px); }
     </style>
@@ -432,9 +433,9 @@
             // --- LOGIC ---
             const togglePrep = (spell) => {
                 const limit = cur.maxSlots[spell.level] || 99; 
+                // Strict Count: Exclude Focus/Ritual
                 const count = cur.prepared.filter(p => {
                     const s = dbSpells.find(x => x.id === p.spellId);
-                    // Strict Count: Exclude Focus/Ritual
                     return s && s.level === spell.level && !s.traditions.includes("Focus") && !s.traditions.includes("Ritual");
                 }).length;
                 
@@ -469,7 +470,6 @@
             };
 
             const toggleCast = (spell, pInst) => {
-                // FOCUS POINT LOGIC
                 if (spell.traditions.includes("Focus")) {
                     if (!pInst) { 
                         if (cur.focusPoint > 0) {
@@ -500,22 +500,18 @@
                     }
                 }
                 
-                // RITUAL LOGIC (FIXED)
                 if (spell.traditions.includes("Ritual")) {
                      if (pInst) {
-                         // Toggle existing
                          const newActive = !pInst.isActive;
-                         updateProfile({ prepared: cur.prepared.map(p => p.uuid === pInst.uuid ? { ...p, isActive: newActive } : p) });
+                         performCast(spell, pInst, newActive, true);
                          notify(newActive ? "Ritual Active" : "Ritual Ended", "neutral");
                      } else {
-                         // First Perform: Create Entry as Active
                          updateProfile({ prepared: [...cur.prepared, { spellId: spell.id, uuid: Date.now(), used: false, isActive: true }] });
                          notify("Ritual Active", "neutral");
                      }
                      return;
                 }
 
-                // STANDARD LOGIC 
                 const newStatus = !pInst.used;
                 performCast(spell, pInst, newStatus, false);
             };
@@ -652,6 +648,7 @@
 
                          <h2 className="text-sky-400 font-bold mb-2 text-xs uppercase tracking-wider border-b border-slate-700 pb-1">My Spellbook</h2>
                          {knownIds.length === 0 ? <div className="text-gray-600 text-xs italic p-2">Empty. Learn spells below.</div> : dbSpells.filter(s => knownIds.includes(s.id)).map(s => {
+                             // Strict Count check for buttons
                              const count = cur.prepared.filter(p => {
                                  const x = dbSpells.find(ref => ref.id === p.spellId);
                                  return x && x.level === s.level && !x.traditions.includes("Focus") && !x.traditions.includes("Ritual");
@@ -713,6 +710,11 @@
                         <button onClick={handleExport} className="bg-slate-700 border border-slate-600 p-3 rounded flex flex-col items-center hover:bg-slate-600 transition"><span className="text-xl mb-1">💾</span><span className="text-xs font-bold text-slate-300">Backup Data</span></button>
                         <button onClick={handleImport} className="bg-slate-700 border border-slate-600 p-3 rounded flex flex-col items-center hover:bg-slate-600 transition"><span className="text-xl mb-1">📂</span><span className="text-xs font-bold text-slate-300">Restore Data</span></button>
                     </div>
+
+                    <div className="mt-4 flex justify-end">
+                        <a href='https://ko-fi.com/J3J81P2MNC' target='_blank'><img height='36' style={{border:'0px',height:'36px'}} src='https://storage.ko-fi.com/cdn/kofi4.png?v=6' border='0' alt='Buy Me a Coffee at ko-fi.com' /></a>
+                    </div>
+
                     <p className="text-center text-[10px] text-slate-600 mt-4">Data is saved automatically to this browser.</p>
                 </div>
             );
@@ -727,8 +729,12 @@
                                 {renderDailyPrep()}
                                 <h2 className="text-slate-500 font-bold mb-2 text-xs uppercase tracking-widest mt-6">Known Spells</h2>
                                 {dbSpells.filter(s => cur.spells.includes(s.id) && !s.traditions.includes('Focus') && !s.traditions.includes('Ritual')).map(s => {
-                                    const count = cur.prepared.filter(p => dbSpells.find(x=>x.id===p.spellId)?.level===s.level).length;
+                                    const count = cur.prepared.filter(p => {
+                                        const x = dbSpells.find(ref => ref.id === p.spellId);
+                                        return x && x.level === s.level && !x.traditions.includes("Focus") && !x.traditions.includes("Ritual");
+                                    }).length;
                                     const full = count >= (cur.maxSlots[s.level]||0);
+                                    
                                     const isSpecial = s.traditions.includes("Ritual") || s.traditions.includes("Focus");
                                     return <SpellCard key={s.id} spell={s} actionLabel={(!isSpecial && full) ? "Slots Full" : "Prepare"} disabled={!isSpecial && full} actionType="prepare" onAction={() => togglePrep(s)} />;
                                 })}
@@ -770,16 +776,6 @@
         }
         const root = ReactDOM.createRoot(document.getElementById('root'));
         root.render(<App />);
-    </script>
-    
-    <script src='https://storage.ko-fi.com/cdn/scripts/overlay-widget.js'></script>
-    <script>
-      kofiWidgetOverlay.draw('maccadies', {
-        'type': 'floating-chat',
-        'floating-chat.donateButton.text': 'Support me',
-        'floating-chat.donateButton.background-color': '#794bc4',
-        'floating-chat.donateButton.text-color': '#fff'
-      });
     </script>
 </body>
 </html>
