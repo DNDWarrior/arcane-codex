@@ -1,0 +1,788 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Arcane Codex v5.7 (Ritual Fix)</title>
+    
+    <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+    <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <script src="spells.js"></script>
+    <script src="items.js"></script>
+
+    <link rel="manifest" href="manifest.json">
+    <script>
+        if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.register('sw.js')
+                .then(() => console.log('SW Registered'))
+                .catch(err => console.log('SW Failed', err));
+        }
+    </script>
+
+    <script src="https://apis.google.com/js/api.js"></script>
+    <script src="https://accounts.google.com/gsi/client"></script>
+
+    <style>
+        body { background-color: #0f172a; color: #e2e8f0; font-family: 'Segoe UI', sans-serif; }
+        .spell-card { background-color: #1e293b; border: 1px solid #334155; box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.3); }
+        .stat-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 0.5rem; font-size: 0.7rem; background: #0f172a; padding: 0.5rem; border-radius: 0.25rem; }
+        .tag { font-size: 0.65rem; padding: 2px 6px; border-radius: 4px; font-weight: bold; text-transform: uppercase; letter-spacing: 0.05em; }
+        .tag-trait { background: #334155; color: #94a3b8; border: 1px solid #475569; }
+        .tag-rare { background: #451a03; color: #fbbf24; border: 1px solid #92400e; }
+        
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: #0f172a; }
+        ::-webkit-scrollbar-thumb { background: #334155; border-radius: 3px; }
+        
+        @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
+        .fade-in { animation: fadeIn 0.2s ease-in; }
+        
+        @keyframes pulsePurple { 0% { box-shadow: 0 0 0 #a855f7; } 70% { box-shadow: 0 0 10px #a855f7; } 100% { box-shadow: 0 0 0 #a855f7; } }
+        .focus-active { background-color: #9333ea; border-color: #d8b4fe; color: white; box-shadow: 0 0 10px #9333ea; animation: pulsePurple 2s infinite; }
+        .focus-empty { background-color: #1e293b; border-color: #475569; color: #475569; border-style: dashed; }
+
+        @keyframes glowPulse { 0% { box-shadow: 0 0 5px #10b981; } 50% { box-shadow: 0 0 15px #10b981; } 100% { box-shadow: 0 0 5px #10b981; } }
+        .active-cantrip { border-color: #10b981; animation: glowPulse 2s infinite; background-color: rgba(16, 185, 129, 0.05); }
+        .ritual-active { border-color: #10b981; animation: glowPulse 3s infinite; background-color: rgba(16, 185, 129, 0.1); }
+
+        details > summary { list-style: none; cursor: pointer; transition: color 0.2s; }
+        details > summary::-webkit-details-marker { display: none; }
+        details[open] > summary { margin-bottom: 10px; color: #38bdf8; }
+        
+        @keyframes slideUp { from { transform: translateY(100%); opacity: 0; } to { transform: translateY(0); opacity: 1; } }
+        .toast { animation: slideUp 0.3s ease-out; }
+
+        .modal-backdrop { background-color: rgba(0, 0, 0, 0.7); backdrop-filter: blur(2px); }
+    </style>
+</head>
+<body>
+    <div id="root"></div>
+
+    <script type="text/babel">
+        const { useState, useEffect, useRef } = React;
+
+        // ==========================================
+        // 🔑 PASTE YOUR GOOGLE KEYS HERE
+        // ==========================================
+        const GOOGLE_CLIENT_ID = "PASTE_YOUR_CLIENT_ID_HERE";
+        const GOOGLE_API_KEY = "PASTE_YOUR_API_KEY_HERE";
+        // ==========================================
+        
+        const DISCOVERY_DOC = 'https://www.googleapis.com/discovery/v1/apis/drive/v3/rest';
+        const SCOPES = 'https://www.googleapis.com/auth/drive.file';
+
+        // --- DATA MAPPER ---
+        const normalizeSpell = (raw, index, forceType = null) => {
+            if (!raw) return null;
+            let lvl = 0;
+            const type = (raw.spell_type || "").toLowerCase();
+            const rawTraits = raw.trait || "";
+            
+            if (type.includes("cantrip")) lvl = 0;
+            else {
+                if (typeof raw.rank === 'string') lvl = parseInt(raw.rank.replace(/\D/g, '')) || 1;
+                else lvl = raw.rank || 1;
+            }
+
+            let trads = raw.tradition || "";
+            if (forceType === "Ritual" || rawTraits.includes("Ritual") || type.includes("ritual")) { if (!trads.includes("Ritual")) trads += ", Ritual"; }
+            if (forceType === "Focus" || rawTraits.includes("Focus") || type.includes("focus")) { if (!trads.includes("Focus")) trads += ", Focus"; }
+            if (trads.startsWith(", ")) trads = trads.substring(2);
+            if (trads === "") trads = "Universal";
+
+            let act = raw.actions || "";
+            if (act.toLowerCase().includes("one")) act = "1";
+            else if (act.toLowerCase().includes("two")) act = "2";
+            else if (act.toLowerCase().includes("three")) act = "3";
+            else if (act.toLowerCase().includes("reaction")) act = "Reaction";
+            else if (act.toLowerCase().includes("free")) act = "Free";
+            
+            let traitsArr = [];
+            if (rawTraits) traitsArr = rawTraits.split(',').map(t => t.trim());
+            
+            return {
+                id: index, 
+                name: raw.name || "Unknown",
+                level: lvl,
+                traditions: trads,
+                actions: act,
+                traits: traitsArr,
+                range: raw.range || "-",
+                target: raw.target || "-",
+                duration: raw.duration || "-",
+                area: raw.area || "-",
+                defense: raw.defense || "-",
+                desc: raw.summary || "",
+                heighten: raw.heighten || null,
+                rarity: raw.rarity || "Common",
+                trigger: raw.trigger || null,
+                gp_cost: 0
+            };
+        };
+
+        const WIZARD_TABLE = {
+            1: {0:5,1:2}, 2: {0:5,1:3}, 3: {0:5,1:3,2:2}, 4: {0:5,1:3,2:3}, 5: {0:5,1:3,2:3,3:2},
+            6: {0:5,1:3,2:3,3:3}, 7: {0:5,1:3,2:3,3:3,4:2}, 8: {0:5,1:3,2:3,3:3,4:3}, 9: {0:5,1:3,2:3,3:3,4:3,5:2},
+            10: {0:5,1:3,2:3,3:3,4:3,5:3}, 11: {0:5,1:3,2:3,3:3,4:3,5:3,6:2}, 12: {0:5,1:3,2:3,3:3,4:3,5:3,6:3},
+            13: {0:5,1:3,2:3,3:3,4:3,5:3,6:3,7:2}, 14: {0:5,1:3,2:3,3:3,4:3,5:3,6:3,7:3}, 15: {0:5,1:3,2:3,3:3,4:3,5:3,6:3,7:3,8:2},
+            16: {0:5,1:3,2:3,3:3,4:3,5:3,6:3,7:3,8:3}, 17: {0:5,1:3,2:3,3:3,4:3,5:3,6:3,7:3,8:3,9:2}, 
+            18: {0:5,1:3,2:3,3:3,4:3,5:3,6:3,7:3,8:3,9:3}, 19: {0:5,1:3,2:3,3:3,4:3,5:3,6:3,7:3,8:3,9:3}, 20: {0:5,1:3,2:3,3:3,4:3,5:3,6:3,7:3,8:3,9:3}
+        };
+
+        // --- COMPONENTS ---
+        const SpellCard = ({ spell, actionLabel, actionType, onAction, disabled, isActive }) => {
+            const isRitual = spell.traditions.includes("Ritual");
+            const isFocus = spell.traditions.includes("Focus");
+            const headerColor = isRitual ? "text-amber-500" : isFocus ? "text-purple-400" : "text-sky-400";
+            
+            let cardClass = "spell-card p-3 mb-3 rounded-lg fade-in border ";
+            if (isActive) {
+                if(isRitual) cardClass += "ritual-active";
+                else cardClass += "active-cantrip";
+            } else {
+                cardClass += "border-slate-700";
+            }
+
+            let btnClass = `w-full py-2 rounded font-bold text-xs uppercase tracking-wider transition-all `;
+            if (disabled) btnClass += 'bg-slate-800 text-slate-600 border border-slate-700 cursor-not-allowed';
+            else if (actionType === 'cast') {
+                 if (isActive) btnClass += 'bg-emerald-600 text-white shadow-[0_0_10px_#10b981]';
+                 else btnClass += isRitual ? 'bg-amber-700 hover:bg-amber-600 text-white' : isFocus ? 'bg-purple-700 hover:bg-purple-600 text-white' : 'bg-emerald-700 hover:bg-emerald-600 text-white';
+            }
+            else if (actionType === 'learn') btnClass += 'bg-slate-700 hover:bg-slate-600 text-sky-400 border border-slate-600';
+            else if (actionType === 'remove') btnClass += 'bg-red-900/30 hover:bg-red-900/50 text-red-400 border border-red-900/50';
+            else btnClass += 'bg-sky-700 hover:bg-sky-600 text-white';
+
+            return (
+                <div className={cardClass}>
+                    <div className="flex justify-between items-start mb-2">
+                        <div>
+                            <div className="flex items-center gap-2">
+                                <h3 className={`font-bold ${headerColor} text-lg leading-tight`}>{spell.name}</h3>
+                                <span className="text-[10px] font-mono bg-slate-700 text-gray-300 px-1.5 py-0.5 rounded border border-slate-600">
+                                    {isRitual ? `Ritual ${spell.level}` : isFocus ? `Focus ${spell.level}` : spell.level === 0 ? "Cantrip" : `Rank ${spell.level}`}
+                                </span>
+                            </div>
+                            <div className="flex flex-wrap gap-1 mt-1">
+                                {spell.rarity !== "Common" && <span className="tag tag-rare">{spell.rarity}</span>}
+                                {spell.traits.slice(0, 4).map(t => <span key={t} className="tag tag-trait">{t}</span>)}
+                            </div>
+                        </div>
+                        <div className="bg-slate-800 border border-slate-600 rounded px-2 py-1 text-center min-w-[40px]">
+                            <span className="block text-[9px] text-gray-500 uppercase">Act</span>
+                            <span className="font-bold text-white">{spell.actions}</span>
+                        </div>
+                    </div>
+                    <div className="stat-grid mb-2">
+                        <div className="text-gray-400">Range: <span className="text-gray-200">{spell.range}</span></div>
+                        <div className="text-gray-400">Target: <span className="text-gray-200 truncate">{spell.target}</span></div>
+                        <div className="text-gray-400">Duration: <span className="text-gray-200">{spell.duration}</span></div>
+                        <div className="text-gray-400">Def/Save: <span className="text-gray-200">{spell.defense}</span></div>
+                        {spell.area !== "" && spell.area !== "-" && <div className="col-span-2 text-gray-400">Area: <span className="text-gray-200">{spell.area}</span></div>}
+                        {spell.trigger && <div className="col-span-2 text-amber-500">Trigger: <span className="text-gray-200">{spell.trigger}</span></div>}
+                    </div>
+                    <div className="text-sm text-gray-300 leading-relaxed mb-3 border-l-2 border-slate-600 pl-2">
+                        {spell.desc}
+                        {spell.heighten && <div className="mt-2 text-xs text-sky-300 font-bold">Heighten: {spell.heighten}</div>}
+                    </div>
+                    <button onClick={onAction} disabled={disabled} className={btnClass}>
+                        {isActive ? (isRitual ? "ACTIVE" : "CASTED (Undo)") : actionLabel}
+                    </button>
+                </div>
+            );
+        };
+
+        const Modal = ({ isOpen, type, title, msg, onConfirm, onCancel }) => {
+            const [inputVal, setInputVal] = useState("");
+            const inputRef = useRef(null);
+            useEffect(() => { if (isOpen && type === 'prompt') { setInputVal(""); setTimeout(() => inputRef.current?.focus(), 100); } }, [isOpen, type]);
+            if (!isOpen) return null;
+            const handleConfirm = () => { if (type === 'prompt') onConfirm(inputVal); else onConfirm(); };
+            return (
+                <div className="fixed inset-0 z-[100] modal-backdrop flex items-center justify-center p-4 fade-in">
+                    <div className="bg-slate-800 border border-slate-600 p-5 rounded-lg shadow-2xl w-full max-w-xs">
+                        <h3 className="text-lg font-bold text-white mb-2">{title || "Notice"}</h3>
+                        <p className="text-slate-300 text-sm mb-4 leading-relaxed">{msg}</p>
+                        {type === 'prompt' && ( <input ref={inputRef} type="text" value={inputVal} onChange={(e) => setInputVal(e.target.value)} onKeyDown={(e) => e.key === 'Enter' && handleConfirm()} className="w-full bg-slate-900 border border-slate-600 rounded p-2 text-white mb-4 focus:outline-none focus:border-sky-500" /> )}
+                        <div className="flex gap-3 justify-end">
+                            {type !== 'alert' && ( <button onClick={onCancel} className="px-4 py-2 rounded text-sm font-bold text-slate-400 hover:text-white hover:bg-slate-700">Cancel</button> )}
+                            <button onClick={handleConfirm} className="px-4 py-2 rounded text-sm font-bold bg-sky-600 text-white hover:bg-sky-500 shadow-lg">{type === 'alert' ? 'OK' : 'Confirm'}</button>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+        function App() {
+            const [view, setView] = useState('spellbook'); 
+            const [prepTab, setPrepTab] = useState('spells'); 
+            const [notification, setNotification] = useState(null);
+            const [activeProfileId, setActiveProfileId] = useState("char_1");
+            const [profiles, setProfiles] = useState({}); 
+            const [dbSpells, setDbSpells] = useState([]);
+            const [dbItems, setDbItems] = useState([]);
+            const [itemSelect, setItemSelect] = useState("");
+            const [archiveSearch, setArchiveSearch] = useState("");
+            const [isRenaming, setIsRenaming] = useState(false);
+            const [renameVal, setRenameVal] = useState("");
+            const [modal, setModal] = useState({ isOpen: false, type: 'alert', title: '', msg: '', onConfirm: () => {}, onCancel: () => {} });
+            
+            // CLOUD & PRO STATE
+            const [gapiInited, setGapiInited] = useState(false);
+            const [tokenClient, setTokenClient] = useState(null);
+            const [isSignedIn, setIsSignedIn] = useState(false);
+            const [isPro, setIsPro] = useState(false);
+            const [promoCode, setPromoCode] = useState("");
+
+            useEffect(() => {
+                let masterList = [];
+                if (window.RAW_SPELLS) masterList = [...masterList, ...window.RAW_SPELLS.map((s, i) => normalizeSpell(s, 1000 + i))];
+                else if (window.DB_SPELLS) masterList = [...masterList, ...window.DB_SPELLS]; 
+                if (window.RAW_RITUALS) masterList = [...masterList, ...window.RAW_RITUALS.map((s, i) => normalizeSpell(s, 5000 + i, "Ritual"))];
+                if (window.RAW_FOCUS) masterList = [...masterList, ...window.RAW_FOCUS.map((s, i) => normalizeSpell(s, 8000 + i, "Focus"))];
+
+                masterList = masterList.filter(s => s !== null);
+                if (masterList.length === 0) masterList = [{ id: 999, name: "No Data", level: 0, traditions: "", traits: [], desc: "Check spells.js" }];
+                setDbSpells(masterList);
+                if (window.DB_ITEMS) { setDbItems(window.DB_ITEMS); setItemSelect(window.DB_ITEMS[0]); }
+
+                const saved = localStorage.getItem('arcaneCodex_v3');
+                if (saved) setProfiles(JSON.parse(saved));
+                else setProfiles({ "char_1": { name: "Merlin", level: 1, spells: [], prepared: [], focusPoint: 1, gold: { gp: 15, sp: 0, cp: 0 }, inventory: [], maxSlots: WIZARD_TABLE[1] } });
+                
+                const proStatus = localStorage.getItem('arcane_pro_status');
+                if (proStatus === 'true') setIsPro(true);
+
+                if(!GOOGLE_CLIENT_ID.includes("PASTE")) {
+                    const script1 = document.createElement('script');
+                    script1.src = "https://apis.google.com/js/api.js";
+                    script1.onload = () => gapi.load('client', initGapi);
+                    document.body.appendChild(script1);
+
+                    const script2 = document.createElement('script');
+                    script2.src = "https://accounts.google.com/gsi/client";
+                    script2.onload = initGis;
+                    document.body.appendChild(script2);
+                }
+            }, []);
+
+            const initGapi = async () => {
+                await gapi.client.init({ apiKey: GOOGLE_API_KEY, discoveryDocs: [DISCOVERY_DOC] });
+                setGapiInited(true);
+            };
+
+            const initGis = () => {
+                const client = google.accounts.oauth2.initTokenClient({
+                    client_id: GOOGLE_CLIENT_ID,
+                    scope: SCOPES,
+                    callback: (resp) => {
+                        if (resp.error) { console.error(resp); return; }
+                        setIsSignedIn(true);
+                    },
+                });
+                setTokenClient(client);
+            };
+
+            const handleAuth = () => {
+                if(tokenClient) tokenClient.requestAccessToken({prompt: ''});
+            };
+
+            const syncToCloud = async () => {
+                if(!isSignedIn) { handleAuth(); return; }
+                notify("Syncing...", "neutral");
+                try {
+                    const query = "name = 'arcane_codex_cloud.json' and trashed = false";
+                    const res = await gapi.client.drive.files.list({ q: query, fields: 'files(id)' });
+                    const files = res.result.files;
+                    const fileContent = JSON.stringify(profiles);
+                    const fileMetadata = { 'name': 'arcane_codex_cloud.json', 'mimeType': 'application/json' };
+
+                    if (files && files.length > 0) {
+                        const fileId = files[0].id;
+                        await gapi.client.request({ path: `/upload/drive/v3/files/${fileId}`, method: 'PATCH', params: { uploadType: 'media' }, body: fileContent });
+                        notify("Cloud Save Complete!");
+                    } else {
+                        const form = new FormData();
+                        form.append('metadata', new Blob([JSON.stringify(fileMetadata)], { type: 'application/json' }));
+                        form.append('file', new Blob([fileContent], { type: 'application/json' }));
+                        await fetch('https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart', { method: 'POST', headers: new Headers({ 'Authorization': 'Bearer ' + gapi.client.getToken().access_token }), body: form });
+                        notify("Cloud File Created!");
+                    }
+                } catch (e) { showAlert("Cloud Error", e.message); }
+            };
+
+            const loadFromCloud = async () => {
+                 if(!isSignedIn) { handleAuth(); return; }
+                 notify("Looking for file...", "neutral");
+                 try {
+                    const query = "name = 'arcane_codex_cloud.json' and trashed = false";
+                    const res = await gapi.client.drive.files.list({ q: query, fields: 'files(id)' });
+                    const files = res.result.files;
+                    if (files && files.length > 0) {
+                        const fileId = files[0].id;
+                        const content = await gapi.client.drive.files.get({ fileId: fileId, alt: 'media' });
+                        setProfiles(content.result);
+                        setActiveProfileId(Object.keys(content.result)[0]);
+                        notify("Cloud Load Success!");
+                    } else {
+                        showAlert("Not Found", "No 'arcane_codex_cloud.json' found in your Drive.");
+                    }
+                 } catch(e) { showAlert("Cloud Error", e.message); }
+            };
+            
+            const handleUnlock = () => {
+                if (promoCode.toUpperCase().trim() === "ARCHMAGE") { 
+                    setIsPro(true);
+                    localStorage.setItem('arcane_pro_status', 'true');
+                    notify("✨ Premium Unlocked! ✨");
+                } else {
+                    showAlert("Invalid Code", "Please check your receipt.");
+                }
+            };
+
+            useEffect(() => { if(Object.keys(profiles).length) localStorage.setItem('arcaneCodex_v3', JSON.stringify(profiles)); }, [profiles]);
+
+            const getProfile = () => {
+                const p = profiles[activeProfileId] || { name: "New", level: 1, spells: [], prepared: [], focusPoint: 1, gold: {}, inventory: [], maxSlots: WIZARD_TABLE[1] };
+                if (p.focusPoint === undefined) p.focusPoint = 1; 
+                return p;
+            };
+            
+            const updateProfile = (data) => setProfiles(prev => ({ ...prev, [activeProfileId]: { ...getProfile(), ...data } }));
+            const notify = (msg, type='success') => { setNotification({msg, type}); setTimeout(()=>setNotification(null), 2000); };
+            const closeModal = () => setModal(prev => ({ ...prev, isOpen: false }));
+            const showAlert = (title, msg) => setModal({ isOpen: true, type: 'alert', title, msg, onConfirm: closeModal, onCancel: closeModal });
+            const showConfirm = (title, msg, onYes) => setModal({ isOpen: true, type: 'confirm', title, msg, onConfirm: () => { onYes(); closeModal(); }, onCancel: closeModal });
+            const showPrompt = (title, msg, onResult) => setModal({ isOpen: true, type: 'prompt', title, msg, onConfirm: (val) => { if(val) onResult(val); closeModal(); }, onCancel: closeModal });
+
+            const createProfile = () => {
+                showPrompt("Create Profile", "Enter character name:", (name) => {
+                    const newId = `char_${Date.now()}`;
+                    setProfiles(prev => ({...prev, [newId]: { name, level: 1, spells: [], prepared: [], focusPoint: 1, gold: {gp:0,sp:0,cp:0}, inventory: [], maxSlots: WIZARD_TABLE[1] }}));
+                    setActiveProfileId(newId);
+                    notify("Character Created");
+                });
+            };
+
+            const deleteProfile = (id) => {
+                showConfirm("Delete Profile", "Are you sure? This cannot be undone.", () => {
+                    const newProfiles = { ...profiles };
+                    delete newProfiles[id];
+                    setProfiles(newProfiles);
+                    if (activeProfileId === id) {
+                        const remaining = Object.keys(newProfiles);
+                        if (remaining.length > 0) setActiveProfileId(remaining[0]);
+                        else createProfile();
+                    }
+                });
+            };
+
+            const saveRename = () => {
+                if(renameVal.trim()) {
+                    updateProfile({ name: renameVal });
+                    setIsRenaming(false);
+                    notify("Renamed");
+                }
+            };
+
+            const handleExport = () => {
+                const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(profiles));
+                const downloadAnchorNode = document.createElement('a');
+                downloadAnchorNode.setAttribute("href",     dataStr);
+                downloadAnchorNode.setAttribute("download", "arcane_codex_save.json");
+                document.body.appendChild(downloadAnchorNode);
+                downloadAnchorNode.click();
+                downloadAnchorNode.remove();
+            };
+
+            const handleImport = () => {
+                const input = document.createElement('input');
+                input.type = 'file';
+                input.onchange = e => {
+                    const file = e.target.files[0];
+                    const reader = new FileReader();
+                    reader.readAsText(file,'UTF-8');
+                    reader.onload = readerEvent => {
+                        try {
+                            const parsed = JSON.parse(readerEvent.target.result);
+                            setProfiles(parsed);
+                            setActiveProfileId(Object.keys(parsed)[0]);
+                            notify("Data Restored!");
+                        } catch (e) { showAlert("Error", "Invalid Save File"); }
+                    }
+                }
+                input.click();
+            };
+
+            const cur = getProfile();
+
+            // --- LOGIC ---
+            const togglePrep = (spell) => {
+                const limit = cur.maxSlots[spell.level] || 99; 
+                const count = cur.prepared.filter(p => {
+                    const s = dbSpells.find(x => x.id === p.spellId);
+                    // Strict Slot Count: Exclude Focus/Ritual
+                    return s && s.level === spell.level && !s.traditions.includes("Focus") && !s.traditions.includes("Ritual");
+                }).length;
+                
+                const isSpecial = spell.traditions.includes("Ritual") || spell.traditions.includes("Focus");
+
+                if (isSpecial || count < limit) {
+                    updateProfile({ prepared: [...cur.prepared, { spellId: spell.id, uuid: Date.now(), used: false, isActive: false }] });
+                    notify(`Prepared ${spell.name}`);
+                } else notify(`Rank ${spell.level} Slots Full`, 'error');
+            };
+
+            const performCast = (spell, pInst, newStatus, isActiveMode = false) => {
+                if (spell.gp_cost > 0 && !pInst.used && !isActiveMode) {
+                     if (cur.gold.gp < spell.gp_cost) {
+                         notify(`Need ${spell.gp_cost} GP`, 'error');
+                         return;
+                     }
+                     showConfirm("Material Cost", `Cast ${spell.name}? Costs ${spell.gp_cost} GP.`, () => {
+                         updateProfile({ 
+                             gold: { ...cur.gold, gp: cur.gold.gp - spell.gp_cost },
+                             prepared: cur.prepared.map(p => p.uuid === pInst.uuid ? { ...p, used: newStatus } : p) 
+                         });
+                     });
+                     return;
+                }
+                
+                if (isActiveMode) {
+                    updateProfile({ prepared: cur.prepared.map(p => p.uuid === pInst.uuid ? { ...p, isActive: newStatus } : p) });
+                } else {
+                    updateProfile({ prepared: cur.prepared.map(p => p.uuid === pInst.uuid ? { ...p, used: newStatus } : p) });
+                }
+            };
+
+            const toggleCast = (spell, pInst) => {
+                if (spell.traditions.includes("Focus")) {
+                    if (!pInst) { 
+                        if (cur.focusPoint > 0) {
+                            updateProfile({ 
+                                focusPoint: 0, 
+                                prepared: [...cur.prepared, { spellId: spell.id, uuid: Date.now(), used: true, isActive: false }] 
+                            });
+                            notify("Focus Point Spent");
+                        } else {
+                             updateProfile({ prepared: [...cur.prepared, { spellId: spell.id, uuid: Date.now(), used: true, isActive: false }] });
+                             notify("Casted (No Focus Point)", "neutral");
+                        }
+                        return;
+                    } else {
+                        if(pInst.used) {
+                             updateProfile({ prepared: cur.prepared.map(p => p.uuid === pInst.uuid ? { ...p, used: false } : p) });
+                             notify("Restored");
+                        } else {
+                             if (cur.focusPoint > 0) {
+                                 updateProfile({ focusPoint: 0, prepared: cur.prepared.map(p => p.uuid === pInst.uuid ? { ...p, used: true } : p) });
+                                 notify("Focus Point Spent");
+                             } else {
+                                 updateProfile({ prepared: cur.prepared.map(p => p.uuid === pInst.uuid ? { ...p, used: true } : p) });
+                                 notify("Casted (No Focus Point)", "neutral");
+                             }
+                        }
+                        return;
+                    }
+                }
+                
+                if (spell.traditions.includes("Ritual")) {
+                     if (pInst) {
+                         const newActive = !pInst.isActive;
+                         performCast(spell, pInst, newActive, true);
+                         notify(newActive ? "Ritual Active" : "Ritual Ended", "neutral");
+                     } else {
+                         updateProfile({ prepared: [...cur.prepared, { spellId: spell.id, uuid: Date.now(), used: false, isActive: true }] });
+                         notify("Ritual Active", "neutral");
+                     }
+                     return;
+                }
+
+                const newStatus = !pInst.used;
+                performCast(spell, pInst, newStatus, false);
+            };
+
+            const toggleRefocus = () => {
+                const val = cur.focusPoint || 0; 
+                if (val === 0) {
+                    updateProfile({ focusPoint: 1 });
+                    notify("Refocused");
+                } else notify("Fully Focused", "error");
+            };
+
+            // --- RENDERERS ---
+            const renderHeader = () => (
+                 <div className="sticky top-0 bg-slate-900/95 backdrop-blur border-b border-slate-700 p-3 z-50 flex justify-between items-center max-w-md mx-auto left-0 right-0">
+                     <div className="flex flex-col">
+                        <h1 className="font-bold text-sky-400 text-lg leading-none">{cur.name}</h1>
+                        <span className="text-[10px] text-slate-400 font-bold uppercase tracking-wider">Level {cur.level}</span>
+                     </div>
+                     <div className="flex gap-3 items-center">
+                        <button onClick={toggleRefocus} className={`w-8 h-8 rounded border-2 flex items-center justify-center transition-all ${cur.focusPoint > 0 ? 'focus-active' : 'focus-empty'}`}><span className="text-xl leading-none">❖</span></button>
+                        <button onClick={()=>showConfirm("Long Rest", "Restore all slots and focus points?", () => updateProfile({focusPoint: 1, prepared: cur.prepared.map(p=>({...p, used:false, isActive:false}))}))} className="bg-blue-900/30 text-blue-300 border border-blue-500/30 px-2 py-1 rounded text-xs font-bold hover:bg-blue-900/50 h-8">Rest</button>
+                     </div>
+                </div>
+            );
+
+            const renderDailyPrep = () => {
+                return (
+                    <div className="bg-slate-800/80 p-3 rounded-lg border border-slate-700 mb-6 backdrop-blur-sm">
+                        <div className="flex gap-1 mb-3 bg-slate-900 p-1 rounded">
+                            <button onClick={()=>setPrepTab('spells')} className={`flex-1 py-1 text-[10px] font-bold uppercase rounded ${prepTab==='spells'?'bg-sky-600 text-white':'text-slate-500 hover:text-gray-300'}`}>📖 Spells</button>
+                            <button onClick={()=>setPrepTab('focus')} className={`flex-1 py-1 text-[10px] font-bold uppercase rounded ${prepTab==='focus'?'bg-purple-600 text-white':'text-slate-500 hover:text-gray-300'}`}>❖ Focus</button>
+                            <button onClick={()=>setPrepTab('rituals')} className={`flex-1 py-1 text-[10px] font-bold uppercase rounded ${prepTab==='rituals'?'bg-amber-600 text-white':'text-slate-500 hover:text-gray-300'}`}>🕯️ Rituals</button>
+                        </div>
+
+                        <div className="flex justify-between items-center mb-2 border-b border-slate-700 pb-2">
+                            <h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest">{prepTab === 'spells' ? 'Slots' : prepTab === 'focus' ? 'Focus Spells' : 'Active Rituals'}</h3>
+                            <button onClick={()=>showConfirm("Clear Prep", "Remove all prepared spells?", () => updateProfile({prepared:[]}))} className="text-[10px] text-slate-500 hover:text-white">Clear All</button>
+                        </div>
+                        
+                        {prepTab === 'spells' && [0,1,2,3,4,5,6,7,8,9].map(lvl => {
+                            const prep = cur.prepared.filter(p => {
+                                const s = dbSpells.find(s=>s.id===p.spellId);
+                                return s && s.level === lvl && !s.traditions.includes("Focus") && !s.traditions.includes("Ritual");
+                            });
+                            if (prep.length === 0 && (!cur.maxSlots[lvl])) return null;
+                            return (
+                                <div key={lvl} className="mb-3 fade-in">
+                                    <div className="text-[10px] text-slate-500 mb-1 uppercase font-bold tracking-wide flex justify-between">
+                                        <span>{lvl===0?"Cantrips":`Rank ${lvl}`}</span>
+                                        {cur.maxSlots[lvl] && <span>{prep.length} / {cur.maxSlots[lvl]}</span>}
+                                    </div>
+                                    <div className="flex flex-wrap gap-2">
+                                        {prep.map((p) => {
+                                            const s = dbSpells.find(x=>x.id===p.spellId) || {name:"?"};
+                                            let style = p.used ? "bg-slate-900 border-slate-700 text-slate-500 grayscale" : lvl===0 ? "bg-sky-900/20 border-sky-500/30 text-sky-100" : "bg-indigo-900/30 border-indigo-500/30 text-indigo-100";
+                                            let btnStyle = p.used ? "bg-slate-800 text-slate-600 border-slate-700" : "bg-slate-700 hover:bg-slate-600 text-white shadow-md";
+                                            
+                                            return (
+                                                <div key={p.uuid} className={`flex-1 min-w-[45%] px-2 py-1.5 rounded flex justify-between items-center border transition-all ${style}`}>
+                                                    <span className={`text-xs font-bold truncate max-w-[100px] ${p.used ? 'line-through':''}`}>{s.name}</span>
+                                                    <div className="flex gap-1">
+                                                        <button onClick={()=>toggleCast(s,p)} className={`text-[9px] px-1.5 py-0.5 rounded font-bold border border-transparent ${btnStyle}`}>{p.used?"CASTED":"CAST"}</button>
+                                                        <button onClick={()=>updateProfile({prepared:cur.prepared.filter(x=>x.uuid!==p.uuid)})} className="text-[10px] text-slate-500 hover:text-red-400 px-1">×</button>
+                                                    </div>
+                                                </div>
+                                            )
+                                        })}
+                                        {lvl > 0 && [...Array(Math.max(0, (cur.maxSlots[lvl]||0) - prep.length))].map((_, i) => (
+                                             <div key={i} className="flex-1 min-w-[45%] h-8 bg-slate-900/30 rounded border border-slate-700 border-dashed"></div>
+                                        ))}
+                                    </div>
+                                </div>
+                            );
+                        })}
+
+                        {prepTab === 'focus' && (
+                            <div className="flex flex-col gap-2 fade-in">
+                                {cur.spells.map(id => dbSpells.find(s => s.id === id)).filter(s => s && s.traditions.includes("Focus")).map(s => {
+                                    const p = cur.prepared.find(x => x.spellId === s.id);
+                                    const isUsed = p ? p.used : false;
+                                    return (
+                                        <div key={s.id} className={`border p-2 rounded flex justify-between items-center transition-all ${isUsed ? 'bg-slate-900 border-slate-700 text-slate-500' : 'bg-purple-900/20 border-purple-500/30'}`}>
+                                            <div>
+                                                <div className={`text-xs font-bold ${isUsed?'':'text-purple-200'}`}>{s.name}</div>
+                                                <div className={`text-[9px] ${isUsed?'':'text-purple-400'}`}>Focus {s.level}</div>
+                                            </div>
+                                            <button onClick={() => toggleCast(s, p)} className={`text-[10px] font-bold px-3 py-1 rounded ${isUsed ? 'bg-slate-800 text-slate-600' : 'bg-purple-700 hover:bg-purple-600 text-white'}`}>
+                                                {isUsed ? "CASTED" : "CAST"}
+                                            </button>
+                                        </div>
+                                    );
+                                })}
+                                {cur.spells.filter(id => dbSpells.find(s => s.id === id && s.traditions.includes("Focus"))).length === 0 && <div className="text-gray-600 text-xs italic text-center py-4">No Focus Spells Learned.</div>}
+                            </div>
+                        )}
+
+                        {prepTab === 'rituals' && (
+                            <div className="flex flex-col gap-2 fade-in">
+                                {cur.spells.map(id => dbSpells.find(s => s.id === id)).filter(s => s && s.traditions.includes("Ritual")).map(s => {
+                                     const p = cur.prepared.find(x => x.spellId === s.id);
+                                     const isActive = p ? p.isActive : false;
+                                     return (
+                                        <div key={s.id} className={`border p-2 rounded flex justify-between items-center transition-all ${isActive ? 'border-emerald-500 ritual-active' : 'bg-amber-900/20 border-amber-500/30'}`}>
+                                            <div>
+                                                <div className="text-xs font-bold text-amber-200">{s.name}</div>
+                                                <div className="text-[9px] text-amber-400">Ritual {s.level}</div>
+                                            </div>
+                                            <button onClick={()=>toggleCast(s, p)} className={`text-white text-[10px] font-bold px-3 py-1 rounded ${isActive ? 'bg-emerald-600 shadow-[0_0_10px_#10b981]' : 'bg-amber-700 hover:bg-amber-600'}`}>{isActive ? "ACTIVE" : "PERFORM"}</button>
+                                        </div>
+                                     )
+                                })}
+                                {cur.spells.filter(s => dbSpells.find(x=>x.id===s && x.traditions.includes("Ritual"))).length === 0 && <div className="text-gray-600 text-xs italic text-center py-4">No Rituals Learned.</div>}
+                            </div>
+                        )}
+                    </div>
+                );
+            };
+
+            const renderGrimoire = () => {
+                const traditions = ["Arcane", "Divine", "Occult", "Primal", "Focus", "Ritual"];
+                const knownIds = cur.spells;
+                return (
+                    <div className="pb-20">
+                         <div className="bg-slate-800 p-3 rounded-lg border border-slate-700 mb-4 flex gap-2 items-center">
+                             <div className="text-xs font-bold text-gray-400 uppercase">Caster Level:</div>
+                             <select id="lvl" className="flex-1 bg-slate-900 text-white text-xs p-1 rounded border border-slate-600">
+                                {[...Array(20)].map((_,i)=> (
+                                    <option key={i+1} value={i+1}>Level {i+1} (Max Rank {Math.ceil((i+1)/2)})</option>
+                                ))}
+                             </select>
+                             <button onClick={()=> {const l=parseInt(document.getElementById('lvl').value); updateProfile({maxSlots:WIZARD_TABLE[l], level:l}); notify(`Level ${l} Applied`)}} className="bg-sky-700 text-white text-xs font-bold px-3 py-1 rounded">Apply</button>
+                         </div>
+
+                         <h2 className="text-sky-400 font-bold mb-2 text-xs uppercase tracking-wider border-b border-slate-700 pb-1">My Spellbook</h2>
+                         {knownIds.length === 0 ? <div className="text-gray-600 text-xs italic p-2">Empty. Learn spells below.</div> : dbSpells.filter(s => knownIds.includes(s.id)).map(s => {
+                             // Strict Count check for buttons
+                             const count = cur.prepared.filter(p => {
+                                 const x = dbSpells.find(ref => ref.id === p.spellId);
+                                 return x && x.level === s.level && !x.traditions.includes("Focus") && !x.traditions.includes("Ritual");
+                             }).length;
+                             const full = count >= (cur.maxSlots[s.level]||0);
+                             const isSpecial = s.traditions.includes("Ritual") || s.traditions.includes("Focus");
+                             return <SpellCard key={s.id} spell={s} actionLabel={(!isSpecial && full) ? "Slots Full" : "Prepare"} disabled={!isSpecial && full} actionType="prepare" onAction={() => togglePrep(s)} />;
+                         })}
+                         
+                         <div className="mt-8 border-b border-slate-700 pb-1 flex justify-between items-end mb-2"><h2 className="text-emerald-400 font-bold text-xs uppercase tracking-wider">The Archives</h2></div>
+                         <input type="text" value={archiveSearch} onChange={e=>setArchiveSearch(e.target.value)} placeholder="Search Archive..." className="w-full bg-slate-900 text-white p-2 rounded border border-slate-700 text-sm mb-4 focus:outline-none focus:border-emerald-500" />
+                         {traditions.map(trad => {
+                             const tradSpells = dbSpells.filter(s => s.traditions && s.traditions.includes(trad) && (archiveSearch === "" || s.name.toLowerCase().includes(archiveSearch.toLowerCase())));
+                             return (
+                                <details key={trad} className="mb-2 bg-slate-800 rounded border border-slate-700 overflow-hidden" open={archiveSearch.length > 0 && tradSpells.length > 0}>
+                                    <summary className="px-3 py-2 font-bold text-gray-300 hover:bg-slate-700 flex justify-between text-sm cursor-pointer">{trad} <span className={`text-xs font-mono px-1.5 rounded ${tradSpells.length>0 ? 'text-white bg-emerald-900' : 'text-slate-600 bg-slate-900'}`}>{tradSpells.length}</span></summary>
+                                    <div className="p-2 bg-slate-900/50">
+                                        {tradSpells.map(s => {
+                                            const isKnown = cur.spells.includes(s.id);
+                                            return <SpellCard key={s.id} spell={s} disabled={isKnown} actionLabel={isKnown ? "Learned" : "Learn"} actionType={isKnown ? "disabled" : "learn"} onAction={() => { updateProfile({spells: [...cur.spells, s.id]}); notify(`Learned ${s.name}`); }} />
+                                        })}
+                                    </div>
+                                </details>
+                             )
+                         })}
+                    </div>
+                );
+            };
+
+            const renderCharacter = () => (
+                <div className="fade-in">
+                    <div className="bg-slate-800 border border-slate-700 p-4 rounded-lg mb-6 relative overflow-hidden">
+                        <div className="absolute top-0 right-0 p-2 opacity-10 text-6xl">👤</div>
+                        <div className="relative z-10">
+                            <div className="text-xs uppercase text-slate-400 font-bold mb-1">Current Profile</div>
+                            {isRenaming ? (
+                                <div className="flex gap-2 mb-2"><input type="text" className="bg-slate-900 border border-slate-600 rounded px-2 py-1 text-white flex-1" defaultValue={cur.name} onChange={e=>setRenameVal(e.target.value)} /><button onClick={saveRename} className="bg-emerald-600 text-white px-3 rounded text-xs font-bold">Save</button></div>
+                            ) : (
+                                <div className="flex items-center gap-2 mb-2"><h2 className="text-2xl font-bold text-white">{cur.name}</h2><button onClick={()=>{setRenameVal(cur.name); setIsRenaming(true)}} className="text-slate-500 hover:text-white">✎</button></div>
+                            )}
+                            <div className="flex gap-4 text-sm text-slate-300"><span>Level {cur.level}</span><span className="text-yellow-500">{cur.gold.gp} GP</span></div>
+                        </div>
+                    </div>
+
+                    <div className="bg-slate-800 p-3 rounded-lg border border-slate-700 mb-6">
+                        <div className="flex justify-between items-center mb-3 border-b border-slate-700 pb-2"><h3 className="text-xs font-bold text-slate-400 uppercase tracking-widest">All Characters</h3><button onClick={createProfile} className="text-[10px] bg-slate-700 px-2 py-1 rounded hover:bg-white hover:text-slate-900 transition">+ Create New</button></div>
+                        <div className="flex flex-col gap-2 max-h-60 overflow-y-auto">
+                            {Object.entries(profiles).map(([id, p]) => (
+                                <div key={id} onClick={()=>setActiveProfileId(id)} className={`flex justify-between items-center p-3 rounded border cursor-pointer transition-all ${id===activeProfileId ? 'bg-sky-900/20 border-sky-500/50 ring-1 ring-sky-500/30':'bg-slate-900 border-slate-700 hover:border-slate-500'}`}>
+                                    <div><div className={`text-sm font-bold ${id===activeProfileId ? 'text-sky-400':'text-gray-300'}`}>{p.name}</div><div className="text-[10px] text-slate-500">Lvl {p.level} • {p.gold ? `${p.gold.gp}g` : '0g'}</div></div>
+                                    {id !== activeProfileId && <button onClick={(e)=>{e.stopPropagation(); deleteProfile(id)}} className="text-xs text-slate-600 hover:text-red-400 px-2 font-bold">×</button>}
+                                    {id === activeProfileId && <span className="text-xs text-sky-500 font-bold">●</span>}
+                                </div>
+                            ))}
+                        </div>
+                    </div>
+
+                    {/* CLOUD LOCK UI */}
+                    <div className={`bg-slate-800 p-3 rounded-lg border ${isPro ? 'border-slate-700' : 'border-amber-500/50'} mb-4 relative overflow-hidden`}>
+                        {!isPro && (
+                            <div className="absolute inset-0 bg-slate-900/80 backdrop-blur-[2px] flex flex-col items-center justify-center z-10 p-4 text-center">
+                                <h3 className="text-amber-400 font-bold text-sm mb-2">🔒 Pro Feature</h3>
+                                <p className="text-gray-400 text-xs mb-3">Support the dev to unlock Cloud Sync & backup your wizards safely.</p>
+                                <div className="flex gap-2 w-full">
+                                    <input type="text" placeholder="Enter Code" className="bg-black/50 border border-slate-600 rounded px-2 text-white text-xs flex-1 outline-none" value={promoCode} onChange={e=>setPromoCode(e.target.value)} />
+                                    <button onClick={handleUnlock} className="bg-amber-600 hover:bg-amber-500 text-white text-xs font-bold px-3 py-2 rounded">Unlock</button>
+                                </div>
+                                <a href="https://ko-fi.com" target="_blank" className="text-[10px] text-sky-400 underline mt-2">Get a code ($5)</a>
+                            </div>
+                        )}
+                        
+                        <h2 className="text-white font-bold mb-2 text-xs uppercase tracking-wide text-sky-400">Cloud Sync (Google Drive)</h2>
+                        {isSignedIn ? (
+                            <div className="grid grid-cols-2 gap-2">
+                                <button onClick={syncToCloud} className="bg-emerald-700 hover:bg-emerald-600 text-white text-xs font-bold py-2 rounded flex flex-col items-center"><span className="text-lg">☁️⬆️</span><span>Save to Cloud</span></button>
+                                <button onClick={loadFromCloud} className="bg-sky-700 hover:bg-sky-600 text-white text-xs font-bold py-2 rounded flex flex-col items-center"><span className="text-lg">☁️⬇️</span><span>Load from Cloud</span></button>
+                            </div>
+                        ) : (
+                            <button onClick={handleAuth} className="w-full bg-white text-slate-900 font-bold py-2 rounded flex items-center justify-center gap-2 hover:bg-gray-200">
+                                <img src="https://upload.wikimedia.org/wikipedia/commons/5/53/Google_%22G%22_Logo.svg" className="w-4 h-4" /> Connect Drive
+                            </button>
+                        )}
+                        <p className="text-[9px] text-slate-500 mt-2 text-center">Saves to 'arcane_codex_cloud.json' in your Drive.</p>
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-3">
+                        <button onClick={handleExport} className="bg-slate-700 border border-slate-600 p-3 rounded flex flex-col items-center hover:bg-slate-600 transition"><span className="text-xl mb-1">💾</span><span className="text-xs font-bold text-slate-300">Backup Data</span></button>
+                        <button onClick={handleImport} className="bg-slate-700 border border-slate-600 p-3 rounded flex flex-col items-center hover:bg-slate-600 transition"><span className="text-xl mb-1">📂</span><span className="text-xs font-bold text-slate-300">Restore Data</span></button>
+                    </div>
+                    <p className="text-center text-[10px] text-slate-600 mt-4">Data is saved automatically to this browser.</p>
+                </div>
+            );
+
+            return (
+                <div className="max-w-md mx-auto min-h-screen bg-slate-900 relative">
+                    {renderHeader()}
+                    {notification && <div className={`toast fixed top-16 left-1/2 transform -translate-x-1/2 px-4 py-2 rounded shadow-xl z-[60] font-bold text-xs flex items-center gap-2 ${notification.type==='error'?'bg-red-600 text-white':'bg-emerald-600 text-white'}`}>{notification.msg}</div>}
+                    <div className="p-3 pb-24">
+                        {view === 'spellbook' && (
+                            <div>
+                                {renderDailyPrep()}
+                                <h2 className="text-slate-500 font-bold mb-2 text-xs uppercase tracking-widest mt-6">Known Spells</h2>
+                                {dbSpells.filter(s => cur.spells.includes(s.id) && !s.traditions.includes('Focus') && !s.traditions.includes('Ritual')).map(s => {
+                                    const count = cur.prepared.filter(p => dbSpells.find(x=>x.id===p.spellId)?.level===s.level).length;
+                                    const full = count >= (cur.maxSlots[s.level]||0);
+                                    return <SpellCard key={s.id} spell={s} actionLabel={full ? "Slots Full" : "Prepare"} disabled={full} actionType="prepare" onAction={() => togglePrep(s)} />;
+                                })}
+                                {cur.spells.length === 0 && <div className="text-center text-gray-600 text-xs mt-10">Go to Grimoire to learn spells.</div>}
+                            </div>
+                        )}
+                        {view === 'inventory' && (
+                            <div className="fade-in">
+                                <div className="flex gap-2 mb-4"><select className="flex-1 bg-slate-800 text-white text-sm p-2 rounded border border-slate-600" value={itemSelect} onChange={e=>setItemSelect(e.target.value)}>{dbItems.map(i=><option key={i} value={i}>{i}</option>)}</select><button onClick={()=>{const exists=cur.inventory.find(x=>x.name===itemSelect); updateProfile({inventory: exists?cur.inventory.map(x=>x.name===itemSelect?{...x,qty:x.qty+1}:x):[...cur.inventory,{name:itemSelect,qty:1}]}); notify("Added")}} className="bg-emerald-600 text-white font-bold px-4 rounded text-sm">Add</button></div>
+                                <div className="bg-slate-800 rounded mb-4 border border-slate-700"><table className="w-full text-left"><tbody className="text-sm divide-y divide-slate-700">{cur.inventory.map((i,idx)=><tr key={idx}><td className="p-3 text-gray-200">{i.name}</td><td className="p-3 text-center w-24"><div className="flex items-center justify-center gap-2"><button className="w-5 h-5 bg-slate-700 rounded" onClick={()=>updateProfile({inventory: cur.inventory.map(x=>x.name===i.name?{...x,qty:Math.max(0,x.qty-1)}:x).filter(x=>x.qty>0)})}>-</button>{i.qty}<button className="w-5 h-5 bg-slate-700 rounded" onClick={()=>updateProfile({inventory: cur.inventory.map(x=>x.name===i.name?{...x,qty:x.qty+1}:x)})}>+</button></div></td></tr>)}</tbody></table></div>
+                                <div className="grid grid-cols-3 gap-2">
+                                    <div className="bg-slate-800 p-2 rounded border border-slate-700"><label className="text-[10px] uppercase text-gray-500 block">Gold</label><input type="number" value={cur.gold.gp||''} placeholder="0" onFocus={e=>e.target.select()} onChange={e=>updateProfile({gold:{...cur.gold, gp: parseInt(e.target.value)||0}})} className="w-full bg-transparent font-bold text-lg outline-none text-yellow-500"/></div>
+                                    <div className="bg-slate-800 p-2 rounded border border-slate-700"><label className="text-[10px] uppercase text-gray-500 block">Silver</label><input type="number" value={cur.gold.sp||''} placeholder="0" onFocus={e=>e.target.select()} onChange={e=>updateProfile({gold:{...cur.gold, sp: parseInt(e.target.value)||0}})} className="w-full bg-transparent font-bold text-lg outline-none text-slate-300"/></div>
+                                    <div className="bg-slate-800 p-2 rounded border border-slate-700"><label className="text-[10px] uppercase text-gray-500 block">Copper</label><input type="number" value={cur.gold.cp||''} placeholder="0" onFocus={e=>e.target.select()} onChange={e=>updateProfile({gold:{...cur.gold, cp: parseInt(e.target.value)||0}})} className="w-full bg-transparent font-bold text-lg outline-none text-orange-600"/></div>
+                                </div>
+                            </div>
+                        )}
+                        {view === 'grimoire' && renderGrimoire()}
+                        {view === 'character' && renderCharacter()}
+                    </div>
+                    <div className="fixed bottom-0 left-0 w-full bg-slate-900/90 border-t border-slate-800 flex justify-around p-2 pb-6 z-50">
+                        <button onClick={()=>setView('spellbook')} className={`flex flex-col items-center ${view==='spellbook'?'text-sky-400':'text-slate-500'}`}><span className="text-xl">📖</span><span className="text-[10px] font-bold">Spells</span></button>
+                        <button onClick={()=>setView('inventory')} className={`flex flex-col items-center ${view==='inventory'?'text-sky-400':'text-slate-500'}`}><span className="text-xl">🎒</span><span className="text-[10px] font-bold">Inv</span></button>
+                        <button onClick={()=>setView('grimoire')} className={`flex flex-col items-center ${view==='grimoire'?'text-sky-400':'text-slate-500'}`}><span className="text-xl">⚙️</span><span className="text-[10px] font-bold">Grimoire</span></button>
+                        <button onClick={()=>setView('character')} className={`flex flex-col items-center ${view==='character'?'text-sky-400':'text-slate-500'}`}><span className="text-xl">👤</span><span className="text-[10px] font-bold">Character</span></button>
+                    </div>
+
+                    {/* MODAL RENDER */}
+                    <Modal 
+                        isOpen={modal.isOpen} 
+                        type={modal.type} 
+                        title={modal.title} 
+                        msg={modal.msg} 
+                        onConfirm={modal.onConfirm} 
+                        onCancel={modal.onCancel} 
+                    />
+                </div>
+            );
+        }
+        const root = ReactDOM.createRoot(document.getElementById('root'));
+        root.render(<App />);
+    </script>
+</body>
+</html>
