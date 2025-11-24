@@ -2,7 +2,6 @@
 <html lang="en">
 <head>
 
-<!-- Google tag (gtag.js) -->
 <script async src="https://www.googletagmanager.com/gtag/js?id=G-QCNBYXR1EP"></script>
 <script>
   window.dataLayer = window.dataLayer || [];
@@ -435,7 +434,7 @@
                 const limit = cur.maxSlots[spell.level] || 99; 
                 const count = cur.prepared.filter(p => {
                     const s = dbSpells.find(x => x.id === p.spellId);
-                    // Strict Slot Count: Exclude Focus/Ritual
+                    // Strict Count: Exclude Focus/Ritual
                     return s && s.level === spell.level && !s.traditions.includes("Focus") && !s.traditions.includes("Ritual");
                 }).length;
                 
@@ -470,6 +469,7 @@
             };
 
             const toggleCast = (spell, pInst) => {
+                // FOCUS POINT LOGIC
                 if (spell.traditions.includes("Focus")) {
                     if (!pInst) { 
                         if (cur.focusPoint > 0) {
@@ -500,18 +500,22 @@
                     }
                 }
                 
+                // RITUAL LOGIC (FIXED)
                 if (spell.traditions.includes("Ritual")) {
                      if (pInst) {
+                         // Toggle existing
                          const newActive = !pInst.isActive;
-                         performCast(spell, pInst, newActive, true);
+                         updateProfile({ prepared: cur.prepared.map(p => p.uuid === pInst.uuid ? { ...p, isActive: newActive } : p) });
                          notify(newActive ? "Ritual Active" : "Ritual Ended", "neutral");
                      } else {
+                         // First Perform: Create Entry as Active
                          updateProfile({ prepared: [...cur.prepared, { spellId: spell.id, uuid: Date.now(), used: false, isActive: true }] });
                          notify("Ritual Active", "neutral");
                      }
                      return;
                 }
 
+                // STANDARD LOGIC 
                 const newStatus = !pInst.used;
                 performCast(spell, pInst, newStatus, false);
             };
@@ -648,7 +652,6 @@
 
                          <h2 className="text-sky-400 font-bold mb-2 text-xs uppercase tracking-wider border-b border-slate-700 pb-1">My Spellbook</h2>
                          {knownIds.length === 0 ? <div className="text-gray-600 text-xs italic p-2">Empty. Learn spells below.</div> : dbSpells.filter(s => knownIds.includes(s.id)).map(s => {
-                             // Strict Count check for buttons
                              const count = cur.prepared.filter(p => {
                                  const x = dbSpells.find(ref => ref.id === p.spellId);
                                  return x && x.level === s.level && !x.traditions.includes("Focus") && !x.traditions.includes("Ritual");
@@ -706,34 +709,6 @@
                         </div>
                     </div>
 
-                    {/* CLOUD LOCK UI */}
-                    <div className={`bg-slate-800 p-3 rounded-lg border ${isPro ? 'border-slate-700' : 'border-amber-500/50'} mb-4 relative overflow-hidden`}>
-                        {!isPro && (
-                            <div className="absolute inset-0 bg-slate-900/80 backdrop-blur-[2px] flex flex-col items-center justify-center z-10 p-4 text-center">
-                                <h3 className="text-amber-400 font-bold text-sm mb-2">🔒 Pro Feature</h3>
-                                <p className="text-gray-400 text-xs mb-3">Support the dev to unlock Cloud Sync & backup your wizards safely.</p>
-                                <div className="flex gap-2 w-full">
-                                    <input type="text" placeholder="Enter Code" className="bg-black/50 border border-slate-600 rounded px-2 text-white text-xs flex-1 outline-none" value={promoCode} onChange={e=>setPromoCode(e.target.value)} />
-                                    <button onClick={handleUnlock} className="bg-amber-600 hover:bg-amber-500 text-white text-xs font-bold px-3 py-2 rounded">Unlock</button>
-                                </div>
-                                <a href="https://ko-fi.com" target="_blank" className="text-[10px] text-sky-400 underline mt-2">Get a code ($5)</a>
-                            </div>
-                        )}
-                        
-                        <h2 className="text-white font-bold mb-2 text-xs uppercase tracking-wide text-sky-400">Cloud Sync (Google Drive)</h2>
-                        {isSignedIn ? (
-                            <div className="grid grid-cols-2 gap-2">
-                                <button onClick={syncToCloud} className="bg-emerald-700 hover:bg-emerald-600 text-white text-xs font-bold py-2 rounded flex flex-col items-center"><span className="text-lg">☁️⬆️</span><span>Save to Cloud</span></button>
-                                <button onClick={loadFromCloud} className="bg-sky-700 hover:bg-sky-600 text-white text-xs font-bold py-2 rounded flex flex-col items-center"><span className="text-lg">☁️⬇️</span><span>Load from Cloud</span></button>
-                            </div>
-                        ) : (
-                            <button onClick={handleAuth} className="w-full bg-white text-slate-900 font-bold py-2 rounded flex items-center justify-center gap-2 hover:bg-gray-200">
-                                <img src="https://upload.wikimedia.org/wikipedia/commons/5/53/Google_%22G%22_Logo.svg" className="w-4 h-4" /> Connect Drive
-                            </button>
-                        )}
-                        <p className="text-[9px] text-slate-500 mt-2 text-center">Saves to 'arcane_codex_cloud.json' in your Drive.</p>
-                    </div>
-
                     <div className="grid grid-cols-2 gap-3">
                         <button onClick={handleExport} className="bg-slate-700 border border-slate-600 p-3 rounded flex flex-col items-center hover:bg-slate-600 transition"><span className="text-xl mb-1">💾</span><span className="text-xs font-bold text-slate-300">Backup Data</span></button>
                         <button onClick={handleImport} className="bg-slate-700 border border-slate-600 p-3 rounded flex flex-col items-center hover:bg-slate-600 transition"><span className="text-xl mb-1">📂</span><span className="text-xs font-bold text-slate-300">Restore Data</span></button>
@@ -754,7 +729,8 @@
                                 {dbSpells.filter(s => cur.spells.includes(s.id) && !s.traditions.includes('Focus') && !s.traditions.includes('Ritual')).map(s => {
                                     const count = cur.prepared.filter(p => dbSpells.find(x=>x.id===p.spellId)?.level===s.level).length;
                                     const full = count >= (cur.maxSlots[s.level]||0);
-                                    return <SpellCard key={s.id} spell={s} actionLabel={full ? "Slots Full" : "Prepare"} disabled={full} actionType="prepare" onAction={() => togglePrep(s)} />;
+                                    const isSpecial = s.traditions.includes("Ritual") || s.traditions.includes("Focus");
+                                    return <SpellCard key={s.id} spell={s} actionLabel={(!isSpecial && full) ? "Slots Full" : "Prepare"} disabled={!isSpecial && full} actionType="prepare" onAction={() => togglePrep(s)} />;
                                 })}
                                 {cur.spells.length === 0 && <div className="text-center text-gray-600 text-xs mt-10">Go to Grimoire to learn spells.</div>}
                             </div>
@@ -795,7 +771,7 @@
         const root = ReactDOM.createRoot(document.getElementById('root'));
         root.render(<App />);
     </script>
-
+    
     <script src='https://storage.ko-fi.com/cdn/scripts/overlay-widget.js'></script>
     <script>
       kofiWidgetOverlay.draw('maccadies', {
@@ -805,5 +781,5 @@
         'floating-chat.donateButton.text-color': '#fff'
       });
     </script>
-    </body>
+</body>
 </html>
