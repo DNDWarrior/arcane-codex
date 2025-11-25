@@ -11,7 +11,7 @@
     
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Arcane Codex v6.6 (Compact)</title>
+    <title>Arcane Codex v6.7 (Grimoire Fix)</title>
     
     <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
@@ -240,7 +240,7 @@
             const [modal, setModal] = useState({ isOpen: false, type: 'alert', title: '', msg: '', onConfirm: () => {}, onCancel: () => {} });
             
             // SLOT CONFIG TAB
-            const [slotConfigTab, setSlotConfigTab] = useState('bonus'); // 'bonus' or 'school'
+            const [slotConfigTab, setSlotConfigTab] = useState('bonus'); 
 
             // CLOUD & PRO STATE
             const [gapiInited, setGapiInited] = useState(false);
@@ -523,7 +523,7 @@
                 if (spell.traditions.includes("Ritual")) {
                      if (pInst) {
                          const newActive = !pInst.isActive;
-                         // Use direct update to ensure isActive property is flipped
+                         // Direct state update logic for ritual visuals
                          updateProfile({ prepared: cur.prepared.map(p => p.uuid === pInst.uuid ? { ...p, isActive: newActive } : p) });
                          notify(newActive ? "Ritual Active" : "Ritual Ended", "neutral");
                      } else {
@@ -719,20 +719,15 @@
                          </details>
 
                          <h2 className="text-sky-400 font-bold mb-2 text-xs uppercase tracking-wider border-b border-slate-700 pb-1">My Spellbook</h2>
-                         {knownIds.length === 0 ? <div className="text-gray-600 text-xs italic p-2">Empty. Learn spells below.</div> : dbSpells.filter(s => knownIds.includes(s.id)).map(s => {
-                             // Strict Count check for buttons
-                             const count = cur.prepared.filter(p => {
-                                 const x = dbSpells.find(ref => ref.id === p.spellId);
-                                 return x && x.level === s.level && !x.traditions.includes("Focus") && !x.traditions.includes("Ritual");
-                             }).length;
-                             
-                             const baseMax = cur.maxSlots[s.level] || 0;
-                             const currMax = cur.curriculumSlots?.[s.level] || 0;
-                             const full = count >= (baseMax + currMax);
-
-                             const isSpecial = s.traditions.includes("Ritual") || s.traditions.includes("Focus");
-                             return <SpellCard key={s.id} spell={s} actionLabel={(!isSpecial && full) ? "Slots Full" : "Prepare"} disabled={!isSpecial && full} actionType="prepare" onAction={() => togglePrep(s)} />;
-                         })}
+                         {knownIds.length === 0 ? <div className="text-gray-600 text-xs italic p-2">Empty. Learn spells below.</div> : dbSpells.filter(s => knownIds.includes(s.id)).map(s => (
+                             <SpellCard
+                                 key={s.id}
+                                 spell={s}
+                                 actionLabel="Remove"
+                                 actionType="remove"
+                                 onAction={() => updateProfile({spells: cur.spells.filter(id => id !== s.id)})}
+                             />
+                        ))}
                          
                          <div className="mt-8 border-b border-slate-700 pb-1 flex justify-between items-end mb-2"><h2 className="text-emerald-400 font-bold text-xs uppercase tracking-wider">The Archives</h2></div>
                          <input type="text" value={archiveSearch} onChange={e=>setArchiveSearch(e.target.value)} placeholder="Search Archive..." className="w-full bg-slate-900 text-white p-2 rounded border border-slate-700 text-sm mb-4 focus:outline-none focus:border-emerald-500" />
