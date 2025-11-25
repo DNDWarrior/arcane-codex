@@ -11,7 +11,7 @@
     
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Arcane Codex v6.5 (Curriculum)</title>
+    <title>Arcane Codex v6.6 (Compact)</title>
     
     <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
@@ -239,6 +239,9 @@
             const [renameVal, setRenameVal] = useState("");
             const [modal, setModal] = useState({ isOpen: false, type: 'alert', title: '', msg: '', onConfirm: () => {}, onCancel: () => {} });
             
+            // SLOT CONFIG TAB
+            const [slotConfigTab, setSlotConfigTab] = useState('bonus'); // 'bonus' or 'school'
+
             // CLOUD & PRO STATE
             const [gapiInited, setGapiInited] = useState(false);
             const [tokenClient, setTokenClient] = useState(null);
@@ -447,12 +450,10 @@
 
             // --- LOGIC ---
             const togglePrep = (spell) => {
-                // Total capacity is Base Slots + Curriculum Slots
                 const baseMax = cur.maxSlots[spell.level] || 0;
                 const currMax = cur.curriculumSlots?.[spell.level] || 0;
                 const limit = baseMax + currMax; 
                 
-                // Strict Count: Exclude Focus/Ritual
                 const count = cur.prepared.filter(p => {
                     const s = dbSpells.find(x => x.id === p.spellId);
                     return s && s.level === spell.level && !s.traditions.includes("Focus") && !s.traditions.includes("Ritual");
@@ -460,7 +461,6 @@
                 
                 const isSpecial = spell.traditions.includes("Ritual") || spell.traditions.includes("Focus");
 
-                // Allow unlimited preparation for Special types, or if under limit
                 if (isSpecial || count < limit) {
                     updateProfile({ prepared: [...cur.prepared, { spellId: spell.id, uuid: Date.now(), used: false, isActive: false }] });
                     notify(`Prepared ${spell.name}`);
@@ -523,9 +523,11 @@
                 if (spell.traditions.includes("Ritual")) {
                      if (pInst) {
                          const newActive = !pInst.isActive;
-                         performCast(spell, pInst, newActive, true);
+                         // Use direct update to ensure isActive property is flipped
+                         updateProfile({ prepared: cur.prepared.map(p => p.uuid === pInst.uuid ? { ...p, isActive: newActive } : p) });
                          notify(newActive ? "Ritual Active" : "Ritual Ended", "neutral");
                      } else {
+                         // First Perform: Create Entry as Active
                          updateProfile({ prepared: [...cur.prepared, { spellId: spell.id, uuid: Date.now(), used: false, isActive: true }] });
                          notify("Ritual Active", "neutral");
                      }
@@ -593,7 +595,6 @@
                                     <div className="flex flex-wrap gap-2">
                                         {prep.map((p, idx) => {
                                             const s = dbSpells.find(x=>x.id===p.spellId) || {name:"?"};
-                                            // Is this overflowing into Curriculum slots?
                                             const isCurriculumSlot = idx >= baseMax;
                                             
                                             let style = p.used ? "bg-slate-900 border-slate-700 text-slate-500 grayscale" : lvl===0 ? "bg-sky-900/20 border-sky-500/30 text-sky-100" : "bg-indigo-900/30 border-indigo-500/30 text-indigo-100";
@@ -611,15 +612,12 @@
                                                 </div>
                                             )
                                         })}
-                                        {/* Base Empty Slots */}
                                         {[...Array(Math.max(0, baseMax - prep.length))].map((_, i) => (
                                              <div key={`base-${i}`} className="flex-1 min-w-[45%] h-8 bg-slate-900/30 rounded border border-slate-700 border-dashed"></div>
                                         ))}
                                         
-                                        {/* Curriculum Header Separator if needed */}
                                         {currMax > 0 && <div className="w-full text-[9px] text-amber-500/50 font-bold uppercase mt-1 mb-0.5 pl-1 border-b border-amber-900/30">Bonus / Curriculum</div>}
                                         
-                                        {/* Curriculum Empty Slots */}
                                         {currMax > 0 && [...Array(Math.max(0, currMax - Math.max(0, prep.length - baseMax)))].map((_, i) => (
                                              <div key={`curr-${i}`} className="flex-1 min-w-[45%] h-8 bg-amber-900/10 rounded border border-amber-600/30 border-dashed relative"><span className="absolute inset-0 flex items-center justify-center text-[8px] text-amber-700 font-bold opacity-50">BONUS</span></div>
                                         ))}
@@ -686,41 +684,43 @@
                              <button onClick={()=> {const l=parseInt(document.getElementById('lvl').value); updateProfile({maxSlots:WIZARD_TABLE[l], level:l}); notify(`Level ${l} Applied`)}} className="bg-sky-700 text-white text-xs font-bold px-3 py-1 rounded">Apply</button>
                          </div>
 
-                         {/* BONUS SLOTS MANAGER */}
-                         <div className="bg-slate-800 p-3 rounded-lg border border-slate-700 mb-4">
-                             <h2 className="text-xs font-bold text-gray-400 uppercase mb-2">Manual Slot Adjustment</h2>
-                             <div className="grid grid-cols-2 gap-2 mb-4">
-                                 {[1,2,3,4,5,6,7,8,9,10].map(lvl => (
-                                     <div key={lvl} className="flex justify-between items-center bg-slate-900 p-2 rounded border border-slate-600">
-                                         <span className="text-[10px] text-gray-400">Rank {lvl}</span>
-                                         <div className="flex items-center gap-2">
-                                              <button onClick={() => adjustMaxSlots(lvl, -1)} className="text-slate-500 hover:text-white font-bold">-</button>
-                                              <span className="text-sky-400 font-bold text-xs w-3 text-center">{cur.maxSlots[lvl] || 0}</span>
-                                              <button onClick={() => adjustMaxSlots(lvl, 1)} className="text-slate-500 hover:text-white font-bold">+</button>
+                         {/* SLOT MANAGER ACCORDION */}
+                         <details className="bg-slate-800 rounded border border-slate-700 mb-4 overflow-hidden">
+                             <summary className="p-3 text-xs font-bold text-gray-400 uppercase cursor-pointer hover:bg-slate-700">Manual Slot Adjustment ▾</summary>
+                             <div className="p-3 pt-0">
+                                 <div className="flex gap-1 mb-3 bg-slate-900 p-1 rounded">
+                                     <button onClick={()=>setSlotConfigTab('bonus')} className={`flex-1 py-1 text-[10px] font-bold uppercase rounded ${slotConfigTab==='bonus'?'bg-sky-600 text-white':'text-slate-500 hover:text-gray-300'}`}>Bonus Slots</button>
+                                     <button onClick={()=>setSlotConfigTab('school')} className={`flex-1 py-1 text-[10px] font-bold uppercase rounded ${slotConfigTab==='school'?'bg-amber-600 text-white':'text-slate-500 hover:text-gray-300'}`}>Curriculum</button>
+                                 </div>
+                                 
+                                 <div className="grid grid-cols-2 gap-2">
+                                     {[1,2,3,4,5,6,7,8,9,10].map(lvl => (
+                                         <div key={lvl} className="flex justify-between items-center bg-slate-900 p-2 rounded border border-slate-600">
+                                             <span className="text-[10px] text-gray-400">Rank {lvl}</span>
+                                             <div className="flex items-center gap-2">
+                                                  {slotConfigTab === 'bonus' ? (
+                                                      <>
+                                                        <button onClick={() => adjustMaxSlots(lvl, -1)} className="text-slate-500 hover:text-white font-bold">-</button>
+                                                        <span className="text-sky-400 font-bold text-xs w-3 text-center">{cur.maxSlots[lvl] || 0}</span>
+                                                        <button onClick={() => adjustMaxSlots(lvl, 1)} className="text-slate-500 hover:text-white font-bold">+</button>
+                                                      </>
+                                                  ) : (
+                                                      <>
+                                                        <button onClick={() => adjustCurriculumSlots(lvl, -1)} className="text-amber-500 hover:text-white font-bold">-</button>
+                                                        <span className="text-amber-400 font-bold text-xs w-3 text-center">{cur.curriculumSlots?.[lvl] || 0}</span>
+                                                        <button onClick={() => adjustCurriculumSlots(lvl, 1)} className="text-amber-500 hover:text-white font-bold">+</button>
+                                                      </>
+                                                  )}
+                                             </div>
                                          </div>
-                                     </div>
-                                 ))}
+                                     ))}
+                                 </div>
                              </div>
-                             
-                             <h2 className="text-xs font-bold text-amber-500 uppercase mb-2 pt-2 border-t border-slate-700">Curriculum Slots</h2>
-                             <div className="grid grid-cols-2 gap-2">
-                                 {[1,2,3,4,5,6,7,8,9,10].map(lvl => (
-                                     <div key={`curr-${lvl}`} className="flex justify-between items-center bg-amber-900/20 p-2 rounded border border-amber-700/50">
-                                         <span className="text-[10px] text-amber-200/70">Rank {lvl}</span>
-                                         <div className="flex items-center gap-2">
-                                              <button onClick={() => adjustCurriculumSlots(lvl, -1)} className="text-amber-500 hover:text-white font-bold">-</button>
-                                              <span className="text-amber-400 font-bold text-xs w-3 text-center">{cur.curriculumSlots?.[lvl] || 0}</span>
-                                              <button onClick={() => adjustCurriculumSlots(lvl, 1)} className="text-amber-500 hover:text-white font-bold">+</button>
-                                         </div>
-                                     </div>
-                                 ))}
-                             </div>
-                             <p className="text-[9px] text-slate-500 mt-2 italic">Add extra slots for Curriculum spells here.</p>
-                         </div>
+                         </details>
 
                          <h2 className="text-sky-400 font-bold mb-2 text-xs uppercase tracking-wider border-b border-slate-700 pb-1">My Spellbook</h2>
                          {knownIds.length === 0 ? <div className="text-gray-600 text-xs italic p-2">Empty. Learn spells below.</div> : dbSpells.filter(s => knownIds.includes(s.id)).map(s => {
-                             // Update full check to account for both Base and Curriculum capacities
+                             // Strict Count check for buttons
                              const count = cur.prepared.filter(p => {
                                  const x = dbSpells.find(ref => ref.id === p.spellId);
                                  return x && x.level === s.level && !x.traditions.includes("Focus") && !x.traditions.includes("Ritual");
@@ -782,6 +782,33 @@
                         </div>
                     </div>
 
+                    <div className={`bg-slate-800 p-3 rounded-lg border ${isPro ? 'border-slate-700' : 'border-amber-500/50'} mb-4 relative overflow-hidden min-h-[220px] flex flex-col justify-center`}>
+                        {!isPro && (
+                            <div className="absolute inset-0 bg-slate-900/80 backdrop-blur-[2px] flex flex-col items-center justify-center z-10 p-4 text-center">
+                                <h3 className="text-amber-400 font-bold text-sm mb-2">🔒 Pro Feature</h3>
+                                <p className="text-gray-400 text-xs mb-3">Support the dev to unlock Cloud Sync & backup your wizards safely.</p>
+                                <div className="flex gap-2 w-full">
+                                    <input type="text" placeholder="Enter Code" className="bg-black/50 border border-slate-600 rounded px-2 text-white text-xs flex-1 outline-none" value={promoCode} onChange={e=>setPromoCode(e.target.value)} />
+                                    <button onClick={handleUnlock} className="bg-amber-600 hover:bg-amber-500 text-white text-xs font-bold px-3 py-2 rounded">Unlock</button>
+                                </div>
+                                <a href="https://ko-fi.com/J3J81P2MNC" target="_blank" className="text-[10px] text-sky-400 underline mt-2">Get a code ($5)</a>
+                            </div>
+                        )}
+                        
+                        <h2 className="text-white font-bold mb-2 text-xs uppercase tracking-wide text-sky-400">Cloud Sync (Google Drive)</h2>
+                        {isSignedIn ? (
+                            <div className="grid grid-cols-2 gap-2">
+                                <button onClick={syncToCloud} className="bg-emerald-700 hover:bg-emerald-600 text-white text-xs font-bold py-2 rounded flex flex-col items-center"><span className="text-lg">☁️⬆️</span><span>Save to Cloud</span></button>
+                                <button onClick={loadFromCloud} className="bg-sky-700 hover:bg-sky-600 text-white text-xs font-bold py-2 rounded flex flex-col items-center"><span className="text-lg">☁️⬇️</span><span>Load from Cloud</span></button>
+                            </div>
+                        ) : (
+                            <button onClick={handleAuth} className="w-full bg-white text-slate-900 font-bold py-2 rounded flex items-center justify-center gap-2 hover:bg-gray-200">
+                                <img src="https://upload.wikimedia.org/wikipedia/commons/5/53/Google_%22G%22_Logo.svg" className="w-4 h-4" /> Connect Drive
+                            </button>
+                        )}
+                        <p className="text-[9px] text-slate-500 mt-2 text-center">Saves to 'arcane_codex_cloud.json' in your Drive.</p>
+                    </div>
+
                     <div className="grid grid-cols-2 gap-3">
                         <button onClick={handleExport} className="bg-slate-700 border border-slate-600 p-3 rounded flex flex-col items-center hover:bg-slate-600 transition"><span className="text-xl mb-1">💾</span><span className="text-xs font-bold text-slate-300">Backup Data</span></button>
                         <button onClick={handleImport} className="bg-slate-700 border border-slate-600 p-3 rounded flex flex-col items-center hover:bg-slate-600 transition"><span className="text-xl mb-1">📂</span><span className="text-xs font-bold text-slate-300">Restore Data</span></button>
@@ -804,7 +831,7 @@
                             <div>
                                 {renderDailyPrep()}
                                 <h2 className="text-slate-500 font-bold mb-2 text-xs uppercase tracking-widest mt-6">Known Spells</h2>
-                                {dbSpells.filter(s => cur.spells.includes(s.id) && !s.traditions.includes('Focus') && !s.traditions.includes('Ritual')).map(s => {
+                                {dbSpells.filter(s => cur.spells.includes(s.id)).map(s => {
                                     // Strict Slot Count for buttons
                                     const count = cur.prepared.filter(p => {
                                         const x = dbSpells.find(ref => ref.id === p.spellId);
