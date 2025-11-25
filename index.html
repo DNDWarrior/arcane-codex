@@ -11,7 +11,7 @@
     
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Arcane Codex v6.5 (Mobile UI Fix)</title>
+    <title>Arcane Codex v6.5 (Curriculum)</title>
     
     <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
@@ -260,7 +260,7 @@
 
                 const saved = localStorage.getItem('arcaneCodex_v3');
                 if (saved) setProfiles(JSON.parse(saved));
-                else setProfiles({ "char_1": { name: "Merlin", level: 1, spells: [], prepared: [], focusPoint: 1, gold: { gp: 15, sp: 0, cp: 0 }, inventory: [], maxSlots: WIZARD_TABLE[1] } });
+                else setProfiles({ "char_1": { name: "Merlin", level: 1, spells: [], prepared: [], focusPoint: 1, gold: { gp: 15, sp: 0, cp: 0 }, inventory: [], maxSlots: WIZARD_TABLE[1], curriculumSlots: {} } });
                 
                 const proStatus = localStorage.getItem('arcane_pro_status');
                 if (proStatus === 'true') setIsPro(true);
@@ -355,8 +355,9 @@
             useEffect(() => { if(Object.keys(profiles).length) localStorage.setItem('arcaneCodex_v3', JSON.stringify(profiles)); }, [profiles]);
 
             const getProfile = () => {
-                const p = profiles[activeProfileId] || { name: "New", level: 1, spells: [], prepared: [], focusPoint: 1, gold: {}, inventory: [], maxSlots: WIZARD_TABLE[1] };
+                const p = profiles[activeProfileId] || { name: "New", level: 1, spells: [], prepared: [], focusPoint: 1, gold: {}, inventory: [], maxSlots: WIZARD_TABLE[1], curriculumSlots: {} };
                 if (p.focusPoint === undefined) p.focusPoint = 1; 
+                if (p.curriculumSlots === undefined) p.curriculumSlots = {}; 
                 return p;
             };
             
@@ -405,6 +406,14 @@
                 });
             };
 
+            const adjustCurriculumSlots = (lvl, delta) => {
+                const currentMax = cur.curriculumSlots?.[lvl] || 0;
+                const newMax = Math.max(0, currentMax + delta);
+                updateProfile({
+                    curriculumSlots: { ...cur.curriculumSlots, [lvl]: newMax }
+                });
+            };
+
             const handleExport = () => {
                 const dataStr = "data:text/json;charset=utf-8," + encodeURIComponent(JSON.stringify(profiles));
                 const downloadAnchorNode = document.createElement('a');
@@ -438,7 +447,11 @@
 
             // --- LOGIC ---
             const togglePrep = (spell) => {
-                const limit = cur.maxSlots[spell.level] || 99; 
+                // Total capacity is Base Slots + Curriculum Slots
+                const baseMax = cur.maxSlots[spell.level] || 0;
+                const currMax = cur.curriculumSlots?.[spell.level] || 0;
+                const limit = baseMax + currMax; 
+                
                 // Strict Count: Exclude Focus/Ritual
                 const count = cur.prepared.filter(p => {
                     const s = dbSpells.find(x => x.id === p.spellId);
@@ -447,6 +460,7 @@
                 
                 const isSpecial = spell.traditions.includes("Ritual") || spell.traditions.includes("Focus");
 
+                // Allow unlimited preparation for Special types, or if under limit
                 if (isSpecial || count < limit) {
                     updateProfile({ prepared: [...cur.prepared, { spellId: spell.id, uuid: Date.now(), used: false, isActive: false }] });
                     notify(`Prepared ${spell.name}`);
@@ -509,11 +523,9 @@
                 if (spell.traditions.includes("Ritual")) {
                      if (pInst) {
                          const newActive = !pInst.isActive;
-                         // Direct state update logic for ritual visuals
-                         updateProfile({ prepared: cur.prepared.map(p => p.uuid === pInst.uuid ? { ...p, isActive: newActive } : p) });
+                         performCast(spell, pInst, newActive, true);
                          notify(newActive ? "Ritual Active" : "Ritual Ended", "neutral");
                      } else {
-                         // First Perform: Create Entry as Active
                          updateProfile({ prepared: [...cur.prepared, { spellId: spell.id, uuid: Date.now(), used: false, isActive: true }] });
                          notify("Ritual Active", "neutral");
                      }
@@ -565,17 +577,28 @@
                                 const s = dbSpells.find(s=>s.id===p.spellId);
                                 return s && s.level === lvl && !s.traditions.includes("Focus") && !s.traditions.includes("Ritual");
                             });
-                            if (prep.length === 0 && (!cur.maxSlots[lvl])) return null;
+                            
+                            const baseMax = cur.maxSlots[lvl] || 0;
+                            const currMax = cur.curriculumSlots?.[lvl] || 0;
+                            const totalMax = baseMax + currMax;
+                            
+                            if (prep.length === 0 && totalMax === 0) return null;
+                            
                             return (
                                 <div key={lvl} className="mb-3 fade-in">
                                     <div className="text-[10px] text-slate-500 mb-1 uppercase font-bold tracking-wide flex justify-between">
                                         <span>{lvl===0?"Cantrips":`Rank ${lvl}`}</span>
-                                        {cur.maxSlots[lvl] && <span>{prep.length} / {cur.maxSlots[lvl]}</span>}
+                                        {totalMax > 0 && <span>{prep.length} / {totalMax}</span>}
                                     </div>
                                     <div className="flex flex-wrap gap-2">
-                                        {prep.map((p) => {
+                                        {prep.map((p, idx) => {
                                             const s = dbSpells.find(x=>x.id===p.spellId) || {name:"?"};
+                                            // Is this overflowing into Curriculum slots?
+                                            const isCurriculumSlot = idx >= baseMax;
+                                            
                                             let style = p.used ? "bg-slate-900 border-slate-700 text-slate-500 grayscale" : lvl===0 ? "bg-sky-900/20 border-sky-500/30 text-sky-100" : "bg-indigo-900/30 border-indigo-500/30 text-indigo-100";
+                                            if (isCurriculumSlot && !p.used && lvl > 0) style = "bg-amber-900/20 border-amber-500/50 text-amber-100 border-dashed";
+                                            
                                             let btnStyle = p.used ? "bg-slate-800 text-slate-600 border-slate-700" : "bg-slate-700 hover:bg-slate-600 text-white shadow-md";
                                             
                                             return (
@@ -588,8 +611,17 @@
                                                 </div>
                                             )
                                         })}
-                                        {lvl > 0 && [...Array(Math.max(0, (cur.maxSlots[lvl]||0) - prep.length))].map((_, i) => (
-                                             <div key={i} className="flex-1 min-w-[45%] h-8 bg-slate-900/30 rounded border border-slate-700 border-dashed"></div>
+                                        {/* Base Empty Slots */}
+                                        {[...Array(Math.max(0, baseMax - prep.length))].map((_, i) => (
+                                             <div key={`base-${i}`} className="flex-1 min-w-[45%] h-8 bg-slate-900/30 rounded border border-slate-700 border-dashed"></div>
+                                        ))}
+                                        
+                                        {/* Curriculum Header Separator if needed */}
+                                        {currMax > 0 && <div className="w-full text-[9px] text-amber-500/50 font-bold uppercase mt-1 mb-0.5 pl-1 border-b border-amber-900/30">Bonus / Curriculum</div>}
+                                        
+                                        {/* Curriculum Empty Slots */}
+                                        {currMax > 0 && [...Array(Math.max(0, currMax - Math.max(0, prep.length - baseMax)))].map((_, i) => (
+                                             <div key={`curr-${i}`} className="flex-1 min-w-[45%] h-8 bg-amber-900/10 rounded border border-amber-600/30 border-dashed relative"><span className="absolute inset-0 flex items-center justify-center text-[8px] text-amber-700 font-bold opacity-50">BONUS</span></div>
                                         ))}
                                     </div>
                                 </div>
@@ -657,7 +689,7 @@
                          {/* BONUS SLOTS MANAGER */}
                          <div className="bg-slate-800 p-3 rounded-lg border border-slate-700 mb-4">
                              <h2 className="text-xs font-bold text-gray-400 uppercase mb-2">Manual Slot Adjustment</h2>
-                             <div className="grid grid-cols-2 gap-2">
+                             <div className="grid grid-cols-2 gap-2 mb-4">
                                  {[1,2,3,4,5,6,7,8,9,10].map(lvl => (
                                      <div key={lvl} className="flex justify-between items-center bg-slate-900 p-2 rounded border border-slate-600">
                                          <span className="text-[10px] text-gray-400">Rank {lvl}</span>
@@ -669,17 +701,35 @@
                                      </div>
                                  ))}
                              </div>
-                             <p className="text-[9px] text-slate-500 mt-2 italic">Use this to add bonus slots from Items or Feats.</p>
+                             
+                             <h2 className="text-xs font-bold text-amber-500 uppercase mb-2 pt-2 border-t border-slate-700">Curriculum Slots</h2>
+                             <div className="grid grid-cols-2 gap-2">
+                                 {[1,2,3,4,5,6,7,8,9,10].map(lvl => (
+                                     <div key={`curr-${lvl}`} className="flex justify-between items-center bg-amber-900/20 p-2 rounded border border-amber-700/50">
+                                         <span className="text-[10px] text-amber-200/70">Rank {lvl}</span>
+                                         <div className="flex items-center gap-2">
+                                              <button onClick={() => adjustCurriculumSlots(lvl, -1)} className="text-amber-500 hover:text-white font-bold">-</button>
+                                              <span className="text-amber-400 font-bold text-xs w-3 text-center">{cur.curriculumSlots?.[lvl] || 0}</span>
+                                              <button onClick={() => adjustCurriculumSlots(lvl, 1)} className="text-amber-500 hover:text-white font-bold">+</button>
+                                         </div>
+                                     </div>
+                                 ))}
+                             </div>
+                             <p className="text-[9px] text-slate-500 mt-2 italic">Add extra slots for Curriculum spells here.</p>
                          </div>
 
                          <h2 className="text-sky-400 font-bold mb-2 text-xs uppercase tracking-wider border-b border-slate-700 pb-1">My Spellbook</h2>
                          {knownIds.length === 0 ? <div className="text-gray-600 text-xs italic p-2">Empty. Learn spells below.</div> : dbSpells.filter(s => knownIds.includes(s.id)).map(s => {
-                             // Strict Count check for buttons
+                             // Update full check to account for both Base and Curriculum capacities
                              const count = cur.prepared.filter(p => {
                                  const x = dbSpells.find(ref => ref.id === p.spellId);
                                  return x && x.level === s.level && !x.traditions.includes("Focus") && !x.traditions.includes("Ritual");
                              }).length;
-                             const full = count >= (cur.maxSlots[s.level]||0);
+                             
+                             const baseMax = cur.maxSlots[s.level] || 0;
+                             const currMax = cur.curriculumSlots?.[s.level] || 0;
+                             const full = count >= (baseMax + currMax);
+
                              const isSpecial = s.traditions.includes("Ritual") || s.traditions.includes("Focus");
                              return <SpellCard key={s.id} spell={s} actionLabel={(!isSpecial && full) ? "Slots Full" : "Prepare"} disabled={!isSpecial && full} actionType="prepare" onAction={() => togglePrep(s)} />;
                          })}
@@ -732,34 +782,6 @@
                         </div>
                     </div>
 
-                    {/* CLOUD LOCK UI */}
-                    <div className={`bg-slate-800 p-3 rounded-lg border ${isPro ? 'border-slate-700' : 'border-amber-500/50'} mb-4 relative overflow-hidden min-h-[220px] flex flex-col justify-center`}>
-                        {!isPro && (
-                            <div className="absolute inset-0 bg-slate-900/80 backdrop-blur-[2px] flex flex-col items-center justify-center z-10 p-4 text-center">
-                                <h3 className="text-amber-400 font-bold text-sm mb-2">🔒 Pro Feature</h3>
-                                <p className="text-gray-400 text-xs mb-3">Support the dev to unlock Cloud Sync & backup your wizards safely.</p>
-                                <div className="flex gap-2 w-full">
-                                    <input type="text" placeholder="Enter Code" className="bg-black/50 border border-slate-600 rounded px-2 text-white text-xs flex-1 outline-none" value={promoCode} onChange={e=>setPromoCode(e.target.value)} />
-                                    <button onClick={handleUnlock} className="bg-amber-600 hover:bg-amber-500 text-white text-xs font-bold px-3 py-2 rounded">Unlock</button>
-                                </div>
-                                <a href="https://ko-fi.com/J3J81P2MNC" target="_blank" className="text-[10px] text-sky-400 underline mt-2">Get a code ($5)</a>
-                            </div>
-                        )}
-                        
-                        <h2 className="text-white font-bold mb-2 text-xs uppercase tracking-wide text-sky-400">Cloud Sync (Google Drive)</h2>
-                        {isSignedIn ? (
-                            <div className="grid grid-cols-2 gap-2">
-                                <button onClick={syncToCloud} className="bg-emerald-700 hover:bg-emerald-600 text-white text-xs font-bold py-2 rounded flex flex-col items-center"><span className="text-lg">☁️⬆️</span><span>Save to Cloud</span></button>
-                                <button onClick={loadFromCloud} className="bg-sky-700 hover:bg-sky-600 text-white text-xs font-bold py-2 rounded flex flex-col items-center"><span className="text-lg">☁️⬇️</span><span>Load from Cloud</span></button>
-                            </div>
-                        ) : (
-                            <button onClick={handleAuth} className="w-full bg-white text-slate-900 font-bold py-2 rounded flex items-center justify-center gap-2 hover:bg-gray-200">
-                                <img src="https://upload.wikimedia.org/wikipedia/commons/5/53/Google_%22G%22_Logo.svg" className="w-4 h-4" /> Connect Drive
-                            </button>
-                        )}
-                        <p className="text-[9px] text-slate-500 mt-2 text-center">Saves to 'arcane_codex_cloud.json' in your Drive.</p>
-                    </div>
-
                     <div className="grid grid-cols-2 gap-3">
                         <button onClick={handleExport} className="bg-slate-700 border border-slate-600 p-3 rounded flex flex-col items-center hover:bg-slate-600 transition"><span className="text-xl mb-1">💾</span><span className="text-xs font-bold text-slate-300">Backup Data</span></button>
                         <button onClick={handleImport} className="bg-slate-700 border border-slate-600 p-3 rounded flex flex-col items-center hover:bg-slate-600 transition"><span className="text-xl mb-1">📂</span><span className="text-xs font-bold text-slate-300">Restore Data</span></button>
@@ -782,13 +804,16 @@
                             <div>
                                 {renderDailyPrep()}
                                 <h2 className="text-slate-500 font-bold mb-2 text-xs uppercase tracking-widest mt-6">Known Spells</h2>
-                                {dbSpells.filter(s => cur.spells.includes(s.id)).map(s => {
+                                {dbSpells.filter(s => cur.spells.includes(s.id) && !s.traditions.includes('Focus') && !s.traditions.includes('Ritual')).map(s => {
                                     // Strict Slot Count for buttons
                                     const count = cur.prepared.filter(p => {
                                         const x = dbSpells.find(ref => ref.id === p.spellId);
                                         return x && x.level === s.level && !x.traditions.includes("Focus") && !x.traditions.includes("Ritual");
                                     }).length;
-                                    const full = count >= (cur.maxSlots[s.level]||0);
+                                    
+                                    const baseMax = cur.maxSlots[s.level] || 0;
+                                    const currMax = cur.curriculumSlots?.[s.level] || 0;
+                                    const full = count >= (baseMax + currMax);
                                     
                                     const isSpecial = s.traditions.includes("Ritual") || s.traditions.includes("Focus");
                                     return <SpellCard key={s.id} spell={s} actionLabel={(!isSpecial && full) ? "Slots Full" : "Prepare"} disabled={!isSpecial && full} actionType="prepare" onAction={() => togglePrep(s)} />;
