@@ -11,7 +11,7 @@
     
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Arcane Codex v7.0 (Clean Slots)</title>
+    <title>Arcane Codex v7.1 (Grandmaster)</title>
     
     <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
@@ -142,20 +142,22 @@
         };
 
         // --- COMPONENTS ---
-        const SpellCard = ({ spell, actionLabel, actionType, onAction, disabled, isActive }) => {
+        const SpellCard = ({ spell, actionLabel, actionType, onAction, disabled, isActive, isCurriculum, onToggleCurriculum }) => {
             const isRitual = spell.traditions.includes("Ritual");
             const isFocus = spell.traditions.includes("Focus");
-            const headerColor = isRitual ? "text-amber-500" : isFocus ? "text-purple-400" : "text-sky-400";
+            const headerColor = isRitual ? "text-amber-500" : isFocus ? "text-purple-400" : isCurriculum ? "text-amber-300" : "text-sky-400";
             
             let cardClass = "spell-card p-3 mb-3 rounded-lg fade-in border ";
             if (isActive) {
                 if(isRitual) cardClass += "ritual-active";
                 else cardClass += "active-cantrip";
+            } else if (isCurriculum) {
+                cardClass += "border-amber-500/50";
             } else {
                 cardClass += "border-slate-700";
             }
 
-            let btnClass = `w-full py-2 rounded font-bold text-xs uppercase tracking-wider transition-all `;
+            let btnClass = `flex-1 py-2 rounded font-bold text-xs uppercase tracking-wider transition-all `;
             if (disabled) btnClass += 'bg-slate-800 text-slate-600 border border-slate-700 cursor-not-allowed';
             else if (actionType === 'cast') {
                  if (isActive) btnClass += 'bg-emerald-600 text-white shadow-[0_0_10px_#10b981]';
@@ -170,10 +172,11 @@
                     <div className="flex justify-between items-start mb-2">
                         <div>
                             <div className="flex items-center gap-2">
-                                <h3 className={`font-bold ${headerColor} text-lg leading-tight`}>{spell.name}</h3>
+                                <h3 className={`font-bold ${headerColor} text-lg leading-tight ${isCurriculum ? 'break-all' : ''}`}>{spell.name}</h3>
                                 <span className="text-[10px] font-mono bg-slate-700 text-gray-300 px-1.5 py-0.5 rounded border border-slate-600">
                                     {isRitual ? `Ritual ${spell.level}` : isFocus ? `Focus ${spell.level}` : spell.level === 0 ? "Cantrip" : `Rank ${spell.level}`}
                                 </span>
+                                {isCurriculum && <span className="text-[9px] bg-amber-900/50 text-amber-300 px-1 py-0.5 rounded border border-amber-700">SCH</span>}
                             </div>
                             <div className="flex flex-wrap gap-1 mt-1">
                                 {spell.rarity !== "Common" && <span className="tag tag-rare">{spell.rarity}</span>}
@@ -197,9 +200,16 @@
                         {spell.desc}
                         {spell.heighten && <div className="mt-2 text-xs text-sky-300 font-bold">Heighten: {spell.heighten}</div>}
                     </div>
-                    <button onClick={onAction} disabled={disabled} className={btnClass}>
-                        {isActive ? (isRitual ? "ACTIVE" : "CASTED (Undo)") : actionLabel}
-                    </button>
+                    <div className="flex gap-2">
+                        <button onClick={onAction} disabled={disabled} className={btnClass}>
+                            {isActive ? (isRitual ? "ACTIVE" : "CASTED (Undo)") : actionLabel}
+                        </button>
+                        {onToggleCurriculum && (
+                            <button onClick={onToggleCurriculum} className={`px-3 py-2 rounded font-bold text-xs border transition-all ${isCurriculum ? 'bg-amber-600 text-white border-amber-500' : 'bg-slate-800 text-slate-500 border-slate-700 hover:border-slate-500'}`}>
+                                C
+                            </button>
+                        )}
+                    </div>
                 </div>
             );
         };
@@ -261,7 +271,7 @@
 
                 const saved = localStorage.getItem('arcaneCodex_v3');
                 if (saved) setProfiles(JSON.parse(saved));
-                else setProfiles({ "char_1": { name: "Merlin", level: 1, spells: [], prepared: [], focusPoint: 1, gold: { gp: 15, sp: 0, cp: 0 }, inventory: [], maxSlots: WIZARD_TABLE[1], curriculumSlots: {}, bonusSlots: {} } });
+                else setProfiles({ "char_1": { name: "Merlin", level: 1, spells: [], prepared: [], focusPoint: 1, gold: { gp: 15, sp: 0, cp: 0 }, inventory: [], maxSlots: WIZARD_TABLE[1], curriculumSlots: {}, bonusSlots: {}, curriculumSpells: [] } });
                 
                 const proStatus = localStorage.getItem('arcane_pro_status');
                 if (proStatus === 'true') setIsPro(true);
@@ -356,10 +366,11 @@
             useEffect(() => { if(Object.keys(profiles).length) localStorage.setItem('arcaneCodex_v3', JSON.stringify(profiles)); }, [profiles]);
 
             const getProfile = () => {
-                const p = profiles[activeProfileId] || { name: "New", level: 1, spells: [], prepared: [], focusPoint: 1, gold: {}, inventory: [], maxSlots: WIZARD_TABLE[1], bonusSlots: {}, curriculumSlots: {} };
+                const p = profiles[activeProfileId] || { name: "New", level: 1, spells: [], prepared: [], focusPoint: 1, gold: {}, inventory: [], maxSlots: WIZARD_TABLE[1], bonusSlots: {}, curriculumSlots: {}, curriculumSpells: [] };
                 if (p.focusPoint === undefined) p.focusPoint = 1; 
                 if (p.bonusSlots === undefined) p.bonusSlots = {}; 
                 if (p.curriculumSlots === undefined) p.curriculumSlots = {}; 
+                if (p.curriculumSpells === undefined) p.curriculumSpells = []; 
                 return p;
             };
             
@@ -408,20 +419,19 @@
                 });
             };
 
-            const adjustBonusSlots = (lvl, delta) => {
-                const current = cur.bonusSlots?.[lvl] || 0;
-                const newVal = Math.max(0, current + delta);
+            const adjustCurriculumSlots = (lvl, delta) => {
+                const currentMax = cur.curriculumSlots?.[lvl] || 0;
+                const newMax = Math.max(0, currentMax + delta);
                 updateProfile({
-                    bonusSlots: { ...cur.bonusSlots, [lvl]: newVal }
+                    curriculumSlots: { ...cur.curriculumSlots, [lvl]: newMax }
                 });
             };
 
-            const adjustCurriculumSlots = (lvl, delta) => {
-                const current = cur.curriculumSlots?.[lvl] || 0;
-                const newVal = Math.max(0, current + delta);
-                updateProfile({
-                    curriculumSlots: { ...cur.curriculumSlots, [lvl]: newVal }
-                });
+            const toggleCurriculumSpell = (spellId) => {
+                 let list = cur.curriculumSpells || [];
+                 if(list.includes(spellId)) list = list.filter(id => id !== spellId);
+                 else list = [...list, spellId];
+                 updateProfile({ curriculumSpells: list });
             };
             
             const applyTemplate = (lvl) => {
@@ -468,7 +478,7 @@
                 const baseMax = cur.maxSlots[spell.level] || 0;
                 const bonusMax = cur.bonusSlots?.[spell.level] || 0;
                 const currMax = cur.curriculumSlots?.[spell.level] || 0;
-                const limit = baseMax + bonusMax + currMax; 
+                const totalLimit = baseMax + bonusMax + currMax; 
                 
                 const count = cur.prepared.filter(p => {
                     const s = dbSpells.find(x => x.id === p.spellId);
@@ -477,7 +487,7 @@
                 
                 const isSpecial = spell.traditions.includes("Ritual") || spell.traditions.includes("Focus");
 
-                if (isSpecial || count < limit) {
+                if (isSpecial || count < totalLimit) {
                     updateProfile({ prepared: [...cur.prepared, { spellId: spell.id, uuid: Date.now(), used: false, isActive: false }] });
                     notify(`Prepared ${spell.name}`);
                 } else notify(`Rank ${spell.level} Slots Full`, 'error');
@@ -539,11 +549,9 @@
                 if (spell.traditions.includes("Ritual")) {
                      if (pInst) {
                          const newActive = !pInst.isActive;
-                         // Direct state update logic for ritual visuals
-                         updateProfile({ prepared: cur.prepared.map(p => p.uuid === pInst.uuid ? { ...p, isActive: newActive } : p) });
+                         performCast(spell, pInst, newActive, true);
                          notify(newActive ? "Ritual Active" : "Ritual Ended", "neutral");
                      } else {
-                         // First Perform: Create Entry as Active
                          updateProfile({ prepared: [...cur.prepared, { spellId: spell.id, uuid: Date.now(), used: false, isActive: true }] });
                          notify("Ritual Active", "neutral");
                      }
@@ -590,18 +598,22 @@
                             <button onClick={()=>showConfirm("Clear Prep", "Remove all prepared spells?", () => updateProfile({prepared:[]}))} className="text-[10px] text-slate-500 hover:text-white">Clear All</button>
                         </div>
                         
-                        {/* KEY / LEGEND */}
                         {prepTab === 'spells' && (
-                            <div className="flex gap-3 text-[9px] mb-3 justify-end">
+                            <div className="flex gap-3 text-[9px] mb-3 justify-start">
                                 {Object.values(cur.bonusSlots || {}).some(v=>v>0) && <span className="text-cyan-400 border border-cyan-500/50 px-1.5 py-0.5 rounded bg-cyan-900/10">Bonus</span>}
                                 {Object.values(cur.curriculumSlots || {}).some(v=>v>0) && <span className="text-amber-400 border border-amber-500/50 px-1.5 py-0.5 rounded bg-amber-900/10">Curriculum</span>}
                             </div>
                         )}
-                        
+
                         {prepTab === 'spells' && [0,1,2,3,4,5,6,7,8,9].map(lvl => {
+                            // Sort Logic: Curriculum spells -> Then regular spells
                             const prep = cur.prepared.filter(p => {
                                 const s = dbSpells.find(s=>s.id===p.spellId);
                                 return s && s.level === lvl && !s.traditions.includes("Focus") && !s.traditions.includes("Ritual");
+                            }).sort((a, b) => {
+                                // If we are trying to prioritize filling curriculum slots first, we should sort curriculum spells to the end? 
+                                // Actually, let's stick to FIFO order but map them to slots intelligently below.
+                                return 0;
                             });
                             
                             const baseMax = cur.maxSlots[lvl] || 0;
@@ -611,6 +623,56 @@
                             
                             if (prep.length === 0 && totalMax === 0) return null;
                             
+                            // Slot Mapping Logic:
+                            // We have P spells prepared. We have B base, X bonus, C curriculum slots.
+                            // Spells marked as [C] (Curriculum) PREFER C slots.
+                            // Spells NOT marked as [C] PREFER B or X slots.
+                            
+                            const curriculumSpells = prep.filter(p => (cur.curriculumSpells||[]).includes(p.spellId));
+                            const standardSpells = prep.filter(p => !(cur.curriculumSpells||[]).includes(p.spellId));
+                            
+                            // Rebuild display list:
+                            // 1. Standard slots filled by standard spells
+                            // 2. Bonus slots filled by remaining standard spells
+                            // 3. Curriculum slots filled by curriculum spells
+                            
+                            // Simplified Visual Model: Just list them all, but style the slots.
+                            // We will map indices to slot types.
+                            // 0 -> baseMax-1: BASE
+                            // baseMax -> baseMax+bonusMax-1: BONUS
+                            // baseMax+bonusMax -> totalMax-1: CURRICULUM
+                            
+                            // But we want Curriculum Spells to visually inhabit the Curriculum Slots if possible.
+                            // So we create a visual array of "Slots"
+                            
+                            let slots = [];
+                            // Add Base Slots
+                            for(let i=0; i<baseMax; i++) slots.push({type: 'base', content: null});
+                            // Add Bonus Slots
+                            for(let i=0; i<bonusMax; i++) slots.push({type: 'bonus', content: null});
+                            // Add Curriculum Slots
+                            for(let i=0; i<currMax; i++) slots.push({type: 'curriculum', content: null});
+                            
+                            // Now fill them
+                            // First, place Curriculum Spells into Curriculum Slots (from back to front of avail C-slots)
+                            let cSpells = [...curriculumSpells];
+                            let sSpells = [...standardSpells];
+                            
+                            // Try to put cSpells into 'curriculum' slots first
+                            for(let i=0; i<slots.length; i++) {
+                                if(slots[i].type === 'curriculum' && cSpells.length > 0) {
+                                    slots[i].content = cSpells.shift();
+                                }
+                            }
+                            
+                            // Fill remaining empty slots from top down with whatever is left (sSpells + remaining cSpells)
+                            let remaining = [...sSpells, ...cSpells];
+                            for(let i=0; i<slots.length; i++) {
+                                if(!slots[i].content && remaining.length > 0) {
+                                    slots[i].content = remaining.shift();
+                                }
+                            }
+
                             return (
                                 <div key={lvl} className="mb-3 fade-in">
                                     <div className="text-[10px] text-slate-500 mb-1 uppercase font-bold tracking-wide flex justify-between">
@@ -618,46 +680,37 @@
                                         {totalMax > 0 && <span>{prep.length} / {totalMax}</span>}
                                     </div>
                                     <div className="flex flex-wrap gap-2">
-                                        {/* Combine everything into one smooth flow */}
-                                        {/* Render Prepared Spells first */}
-                                        {prep.map((p, idx) => {
-                                            const s = dbSpells.find(x=>x.id===p.spellId) || {name:"?"};
+                                        {slots.map((slot, i) => {
+                                            let style = "bg-slate-900/30 border-slate-700 border-dashed"; // Empty
+                                            if (slot.type === 'bonus') style = "bg-cyan-900/10 border-cyan-600/30 border-dashed";
+                                            if (slot.type === 'curriculum') style = "bg-amber-900/10 border-amber-600/30 border-dashed";
                                             
-                                            // Determine if this spell is occupying a special slot
-                                            const isBonus = idx >= baseMax && idx < (baseMax + bonusMax);
-                                            const isCurriculum = idx >= (baseMax + bonusMax);
-                                            
-                                            let style = p.used ? "bg-slate-900 border-slate-700 text-slate-500 grayscale" : lvl===0 ? "bg-sky-900/20 border-sky-500/30 text-sky-100" : "bg-indigo-900/30 border-indigo-500/30 text-indigo-100";
-                                            if (isBonus && !p.used) style = "bg-cyan-900/20 border-cyan-500/50 text-cyan-100 border-dashed";
-                                            if (isCurriculum && !p.used) style = "bg-amber-900/20 border-amber-500/50 text-amber-100 border-dashed";
-                                            
-                                            let btnStyle = p.used ? "bg-slate-800 text-slate-600 border-slate-700" : "bg-slate-700 hover:bg-slate-600 text-white shadow-md";
-                                            
-                                            return (
-                                                <div key={p.uuid} className={`flex-1 min-w-[45%] px-2 py-1.5 rounded flex justify-between items-center border transition-all ${style}`}>
-                                                    <span className={`text-xs font-bold truncate max-w-[100px] ${p.used ? 'line-through':''}`}>{s.name}</span>
-                                                    <div className="flex gap-1">
-                                                        <button onClick={()=>toggleCast(s,p)} className={`text-[9px] px-1.5 py-0.5 rounded font-bold border border-transparent ${btnStyle}`}>{p.used?"CASTED":"CAST"}</button>
-                                                        <button onClick={()=>updateProfile({prepared:cur.prepared.filter(x=>x.uuid!==p.uuid)})} className="text-[10px] text-slate-500 hover:text-red-400 px-1">×</button>
+                                            if (slot.content) {
+                                                const p = slot.content;
+                                                const s = dbSpells.find(x=>x.id===p.spellId) || {name:"?"};
+                                                style = p.used ? "bg-slate-900 border-slate-700 text-slate-500 grayscale" : lvl===0 ? "bg-sky-900/20 border-sky-500/30 text-sky-100" : "bg-indigo-900/30 border-indigo-500/30 text-indigo-100";
+                                                if (slot.type === 'bonus' && !p.used) style = "bg-cyan-900/20 border-cyan-500/50 text-cyan-100";
+                                                if (slot.type === 'curriculum' && !p.used) style = "bg-amber-900/20 border-amber-500/50 text-amber-100";
+                                                
+                                                let btnStyle = p.used ? "bg-slate-800 text-slate-600 border-slate-700" : "bg-slate-700 hover:bg-slate-600 text-white shadow-md";
+
+                                                return (
+                                                    <div key={p.uuid} className={`flex-1 min-w-[45%] px-2 py-1.5 rounded flex justify-between items-center border transition-all ${style}`}>
+                                                        <span className={`text-xs font-bold truncate max-w-[100px] ${p.used ? 'line-through':''}`}>{s.name}</span>
+                                                        <div className="flex gap-1">
+                                                            <button onClick={()=>toggleCast(s,p)} className={`text-[9px] px-1.5 py-0.5 rounded font-bold border border-transparent ${btnStyle}`}>{p.used?"CASTED":"CAST"}</button>
+                                                            <button onClick={()=>updateProfile({prepared:cur.prepared.filter(x=>x.uuid!==p.uuid)})} className="text-[10px] text-slate-500 hover:text-red-400 px-1">×</button>
+                                                        </div>
                                                     </div>
+                                                );
+                                            } else {
+                                                // Empty Slot Render
+                                                return <div key={`empty-${i}`} className={`flex-1 min-w-[45%] h-8 rounded border relative ${style}`}>
+                                                    {slot.type === 'bonus' && <span className="absolute inset-0 flex items-center justify-center text-[8px] text-cyan-700 font-bold opacity-50">BONUS</span>}
+                                                    {slot.type === 'curriculum' && <span className="absolute inset-0 flex items-center justify-center text-[8px] text-amber-700 font-bold opacity-50">SCHOOL</span>}
                                                 </div>
-                                            )
+                                            }
                                         })}
-                                        
-                                        {/* Render Empty BASE Slots */}
-                                        {[...Array(Math.max(0, baseMax - prep.length))].map((_, i) => (
-                                             <div key={`base-${i}`} className="flex-1 min-w-[45%] h-8 bg-slate-900/30 rounded border border-slate-700 border-dashed"></div>
-                                        ))}
-
-                                        {/* Render Empty BONUS Slots */}
-                                        {[...Array(Math.max(0, bonusMax - Math.max(0, prep.length - baseMax)))].map((_, i) => (
-                                             <div key={`bonus-${i}`} className="flex-1 min-w-[45%] h-8 bg-cyan-900/10 rounded border border-cyan-600/30 border-dashed relative"></div>
-                                        ))}
-
-                                        {/* Render Empty CURRICULUM Slots */}
-                                        {[...Array(Math.max(0, currMax - Math.max(0, prep.length - baseMax - bonusMax)))].map((_, i) => (
-                                             <div key={`curr-${i}`} className="flex-1 min-w-[45%] h-8 bg-amber-900/10 rounded border border-amber-600/30 border-dashed relative"></div>
-                                        ))}
                                     </div>
                                 </div>
                             );
@@ -718,7 +771,7 @@
                                     <option key={i+1} value={i+1}>Level {i+1} (Max Rank {Math.ceil((i+1)/2)})</option>
                                 ))}
                              </select>
-                             <button onClick={()=> {const l=parseInt(document.getElementById('lvl').value); applyTemplate(l); }} className="bg-sky-700 text-white text-xs font-bold px-3 py-1 rounded">Apply</button>
+                             <button onClick={()=> {const l=parseInt(document.getElementById('lvl').value); updateProfile({maxSlots:WIZARD_TABLE[l], level:l}); notify(`Level ${l} Applied`)}} className="bg-sky-700 text-white text-xs font-bold px-3 py-1 rounded">Apply</button>
                          </div>
 
                          {/* SLOT MANAGER ACCORDION */}
@@ -756,15 +809,33 @@
                          </details>
 
                          <h2 className="text-sky-400 font-bold mb-2 text-xs uppercase tracking-wider border-b border-slate-700 pb-1">My Spellbook</h2>
-                         {knownIds.length === 0 ? <div className="text-gray-600 text-xs italic p-2">Empty. Learn spells below.</div> : dbSpells.filter(s => knownIds.includes(s.id)).map(s => (
-                             <SpellCard
-                                 key={s.id}
-                                 spell={s}
-                                 actionLabel="Remove"
-                                 actionType="remove"
-                                 onAction={() => updateProfile({spells: cur.spells.filter(id => id !== s.id)})}
-                             />
-                        ))}
+                         {knownIds.length === 0 ? <div className="text-gray-600 text-xs italic p-2">Empty. Learn spells below.</div> : dbSpells.filter(s => knownIds.includes(s.id)).map(s => {
+                             // Strict Count check for buttons
+                             const count = cur.prepared.filter(p => {
+                                 const x = dbSpells.find(ref => ref.id === p.spellId);
+                                 return x && x.level === s.level && !x.traditions.includes("Focus") && !x.traditions.includes("Ritual");
+                             }).length;
+                             
+                             const baseMax = cur.maxSlots[s.level] || 0;
+                             const bonusMax = cur.bonusSlots?.[s.level] || 0;
+                             const currMax = cur.curriculumSlots?.[s.level] || 0;
+                             const full = count >= (baseMax + bonusMax + currMax);
+
+                             const isSpecial = s.traditions.includes("Ritual") || s.traditions.includes("Focus");
+                             const isCurriculumSpell = (cur.curriculumSpells||[]).includes(s.id);
+                             
+                             return (
+                                 <SpellCard
+                                     key={s.id}
+                                     spell={s}
+                                     actionLabel="Remove"
+                                     actionType="remove"
+                                     onAction={() => updateProfile({spells: cur.spells.filter(id => id !== s.id)})}
+                                     isCurriculum={isCurriculumSpell}
+                                     onToggleCurriculum={() => toggleCurriculumSpell(s.id)}
+                                 />
+                             );
+                        })}
                          
                          <div className="mt-8 border-b border-slate-700 pb-1 flex justify-between items-end mb-2"><h2 className="text-emerald-400 font-bold text-xs uppercase tracking-wider">The Archives</h2></div>
                          <input type="text" value={archiveSearch} onChange={e=>setArchiveSearch(e.target.value)} placeholder="Search Archive..." className="w-full bg-slate-900 text-white p-2 rounded border border-slate-700 text-sm mb-4 focus:outline-none focus:border-emerald-500" />
