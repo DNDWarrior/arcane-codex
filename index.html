@@ -11,7 +11,7 @@
     
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Arcane Codex v6.9 (Slot Buckets)</title>
+    <title>Arcane Codex v7.0 (Clean Slots)</title>
     
     <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
@@ -239,6 +239,8 @@
             const [renameVal, setRenameVal] = useState("");
             const [modal, setModal] = useState({ isOpen: false, type: 'alert', title: '', msg: '', onConfirm: () => {}, onCancel: () => {} });
             const [slotConfigTab, setSlotConfigTab] = useState('bonus'); 
+            
+            // CLOUD & PRO STATE
             const [gapiInited, setGapiInited] = useState(false);
             const [tokenClient, setTokenClient] = useState(null);
             const [isSignedIn, setIsSignedIn] = useState(false);
@@ -259,7 +261,7 @@
 
                 const saved = localStorage.getItem('arcaneCodex_v3');
                 if (saved) setProfiles(JSON.parse(saved));
-                else setProfiles({ "char_1": { name: "Merlin", level: 1, spells: [], prepared: [], focusPoint: 1, gold: { gp: 15, sp: 0, cp: 0 }, inventory: [], maxSlots: WIZARD_TABLE[1], bonusSlots: {}, curriculumSlots: {} } });
+                else setProfiles({ "char_1": { name: "Merlin", level: 1, spells: [], prepared: [], focusPoint: 1, gold: { gp: 15, sp: 0, cp: 0 }, inventory: [], maxSlots: WIZARD_TABLE[1], curriculumSlots: {}, bonusSlots: {} } });
                 
                 const proStatus = localStorage.getItem('arcane_pro_status');
                 if (proStatus === 'true') setIsPro(true);
@@ -356,7 +358,7 @@
             const getProfile = () => {
                 const p = profiles[activeProfileId] || { name: "New", level: 1, spells: [], prepared: [], focusPoint: 1, gold: {}, inventory: [], maxSlots: WIZARD_TABLE[1], bonusSlots: {}, curriculumSlots: {} };
                 if (p.focusPoint === undefined) p.focusPoint = 1; 
-                if (p.bonusSlots === undefined) p.bonusSlots = {}; // Init new property
+                if (p.bonusSlots === undefined) p.bonusSlots = {}; 
                 if (p.curriculumSlots === undefined) p.curriculumSlots = {}; 
                 return p;
             };
@@ -398,7 +400,14 @@
                 }
             };
 
-            // Updates the BONUS slots (new logic)
+            const adjustMaxSlots = (lvl, delta) => {
+                const currentMax = cur.maxSlots[lvl] || 0;
+                const newMax = Math.max(0, currentMax + delta);
+                updateProfile({
+                    maxSlots: { ...cur.maxSlots, [lvl]: newMax }
+                });
+            };
+
             const adjustBonusSlots = (lvl, delta) => {
                 const current = cur.bonusSlots?.[lvl] || 0;
                 const newVal = Math.max(0, current + delta);
@@ -407,7 +416,6 @@
                 });
             };
 
-            // Updates the Curriculum slots
             const adjustCurriculumSlots = (lvl, delta) => {
                 const current = cur.curriculumSlots?.[lvl] || 0;
                 const newVal = Math.max(0, current + delta);
@@ -416,7 +424,6 @@
                 });
             };
             
-            // Apply Template now only resets Base Slots (maxSlots)
             const applyTemplate = (lvl) => {
                  updateProfile({ 
                      maxSlots: WIZARD_TABLE[lvl], 
@@ -532,9 +539,11 @@
                 if (spell.traditions.includes("Ritual")) {
                      if (pInst) {
                          const newActive = !pInst.isActive;
-                         performCast(spell, pInst, newActive, true);
+                         // Direct state update logic for ritual visuals
+                         updateProfile({ prepared: cur.prepared.map(p => p.uuid === pInst.uuid ? { ...p, isActive: newActive } : p) });
                          notify(newActive ? "Ritual Active" : "Ritual Ended", "neutral");
                      } else {
+                         // First Perform: Create Entry as Active
                          updateProfile({ prepared: [...cur.prepared, { spellId: spell.id, uuid: Date.now(), used: false, isActive: true }] });
                          notify("Ritual Active", "neutral");
                      }
@@ -581,13 +590,20 @@
                             <button onClick={()=>showConfirm("Clear Prep", "Remove all prepared spells?", () => updateProfile({prepared:[]}))} className="text-[10px] text-slate-500 hover:text-white">Clear All</button>
                         </div>
                         
+                        {/* KEY / LEGEND */}
+                        {prepTab === 'spells' && (
+                            <div className="flex gap-3 text-[9px] mb-3 justify-end">
+                                {Object.values(cur.bonusSlots || {}).some(v=>v>0) && <span className="text-cyan-400 border border-cyan-500/50 px-1.5 py-0.5 rounded bg-cyan-900/10">Bonus</span>}
+                                {Object.values(cur.curriculumSlots || {}).some(v=>v>0) && <span className="text-amber-400 border border-amber-500/50 px-1.5 py-0.5 rounded bg-amber-900/10">Curriculum</span>}
+                            </div>
+                        )}
+                        
                         {prepTab === 'spells' && [0,1,2,3,4,5,6,7,8,9].map(lvl => {
                             const prep = cur.prepared.filter(p => {
                                 const s = dbSpells.find(s=>s.id===p.spellId);
                                 return s && s.level === lvl && !s.traditions.includes("Focus") && !s.traditions.includes("Ritual");
                             });
                             
-                            // NEW LOGIC: Total = Base + Bonus + Curriculum
                             const baseMax = cur.maxSlots[lvl] || 0;
                             const bonusMax = cur.bonusSlots?.[lvl] || 0;
                             const currMax = cur.curriculumSlots?.[lvl] || 0;
@@ -602,10 +618,12 @@
                                         {totalMax > 0 && <span>{prep.length} / {totalMax}</span>}
                                     </div>
                                     <div className="flex flex-wrap gap-2">
+                                        {/* Combine everything into one smooth flow */}
+                                        {/* Render Prepared Spells first */}
                                         {prep.map((p, idx) => {
                                             const s = dbSpells.find(x=>x.id===p.spellId) || {name:"?"};
                                             
-                                            // Determine which bucket this slot falls into
+                                            // Determine if this spell is occupying a special slot
                                             const isBonus = idx >= baseMax && idx < (baseMax + bonusMax);
                                             const isCurriculum = idx >= (baseMax + bonusMax);
                                             
@@ -626,21 +644,19 @@
                                             )
                                         })}
                                         
-                                        {/* Base Empty Slots */}
+                                        {/* Render Empty BASE Slots */}
                                         {[...Array(Math.max(0, baseMax - prep.length))].map((_, i) => (
                                              <div key={`base-${i}`} className="flex-1 min-w-[45%] h-8 bg-slate-900/30 rounded border border-slate-700 border-dashed"></div>
                                         ))}
-                                        
-                                        {/* BONUS Header & Slots */}
-                                        {bonusMax > 0 && <div className="w-full text-[9px] text-cyan-500/50 font-bold uppercase mt-1 mb-0.5 pl-1 border-b border-cyan-900/30">Bonus Slots</div>}
-                                        {bonusMax > 0 && [...Array(Math.max(0, bonusMax - Math.max(0, prep.length - baseMax)))].map((_, i) => (
-                                             <div key={`bonus-${i}`} className="flex-1 min-w-[45%] h-8 bg-cyan-900/10 rounded border border-cyan-600/30 border-dashed relative"><span className="absolute inset-0 flex items-center justify-center text-[8px] text-cyan-700 font-bold opacity-50">BONUS</span></div>
+
+                                        {/* Render Empty BONUS Slots */}
+                                        {[...Array(Math.max(0, bonusMax - Math.max(0, prep.length - baseMax)))].map((_, i) => (
+                                             <div key={`bonus-${i}`} className="flex-1 min-w-[45%] h-8 bg-cyan-900/10 rounded border border-cyan-600/30 border-dashed relative"></div>
                                         ))}
-                                        
-                                        {/* CURRICULUM Header & Slots */}
-                                        {currMax > 0 && <div className="w-full text-[9px] text-amber-500/50 font-bold uppercase mt-1 mb-0.5 pl-1 border-b border-amber-900/30">Curriculum Slots</div>}
-                                        {currMax > 0 && [...Array(Math.max(0, currMax - Math.max(0, prep.length - (baseMax + bonusMax))))].map((_, i) => (
-                                             <div key={`curr-${i}`} className="flex-1 min-w-[45%] h-8 bg-amber-900/10 rounded border border-amber-600/30 border-dashed relative"><span className="absolute inset-0 flex items-center justify-center text-[8px] text-amber-700 font-bold opacity-50">SCHOOL</span></div>
+
+                                        {/* Render Empty CURRICULUM Slots */}
+                                        {[...Array(Math.max(0, currMax - Math.max(0, prep.length - baseMax - bonusMax)))].map((_, i) => (
+                                             <div key={`curr-${i}`} className="flex-1 min-w-[45%] h-8 bg-amber-900/10 rounded border border-amber-600/30 border-dashed relative"></div>
                                         ))}
                                     </div>
                                 </div>
@@ -715,9 +731,9 @@
                                  </div>
                                  
                                  <div className="grid grid-cols-2 gap-2">
-                                     {[1,2,3,4,5,6,7,8,9,10].map(lvl => (
+                                     {[0,1,2,3,4,5,6,7,8,9,10].map(lvl => (
                                          <div key={lvl} className="flex justify-between items-center bg-slate-900 p-2 rounded border border-slate-600">
-                                             <span className="text-[10px] text-gray-400">Rank {lvl}</span>
+                                             <span className="text-[10px] text-gray-400">{lvl === 0 ? 'Cantrips' : `Rank ${lvl}`}</span>
                                              <div className="flex items-center gap-2">
                                                   {slotConfigTab === 'bonus' ? (
                                                       <>
@@ -796,33 +812,6 @@
                                 </div>
                             ))}
                         </div>
-                    </div>
-
-                    <div className={`bg-slate-800 p-3 rounded-lg border ${isPro ? 'border-slate-700' : 'border-amber-500/50'} mb-4 relative overflow-hidden min-h-[220px] flex flex-col justify-center`}>
-                        {!isPro && (
-                            <div className="absolute inset-0 bg-slate-900/80 backdrop-blur-[2px] flex flex-col items-center justify-center z-10 p-4 text-center">
-                                <h3 className="text-amber-400 font-bold text-sm mb-2">🔒 Pro Feature</h3>
-                                <p className="text-gray-400 text-xs mb-3">Support the dev to unlock Cloud Sync & backup your wizards safely.</p>
-                                <div className="flex gap-2 w-full">
-                                    <input type="text" placeholder="Enter Code" className="bg-black/50 border border-slate-600 rounded px-2 text-white text-xs flex-1 outline-none" value={promoCode} onChange={e=>setPromoCode(e.target.value)} />
-                                    <button onClick={handleUnlock} className="bg-amber-600 hover:bg-amber-500 text-white text-xs font-bold px-3 py-2 rounded">Unlock</button>
-                                </div>
-                                <a href="https://ko-fi.com/J3J81P2MNC" target="_blank" className="text-[10px] text-sky-400 underline mt-2">Get a code ($5)</a>
-                            </div>
-                        )}
-                        
-                        <h2 className="text-white font-bold mb-2 text-xs uppercase tracking-wide text-sky-400">Cloud Sync (Google Drive)</h2>
-                        {isSignedIn ? (
-                            <div className="grid grid-cols-2 gap-2">
-                                <button onClick={syncToCloud} className="bg-emerald-700 hover:bg-emerald-600 text-white text-xs font-bold py-2 rounded flex flex-col items-center"><span className="text-lg">☁️⬆️</span><span>Save to Cloud</span></button>
-                                <button onClick={loadFromCloud} className="bg-sky-700 hover:bg-sky-600 text-white text-xs font-bold py-2 rounded flex flex-col items-center"><span className="text-lg">☁️⬇️</span><span>Load from Cloud</span></button>
-                            </div>
-                        ) : (
-                            <button onClick={handleAuth} className="w-full bg-white text-slate-900 font-bold py-2 rounded flex items-center justify-center gap-2 hover:bg-gray-200">
-                                <img src="https://upload.wikimedia.org/wikipedia/commons/5/53/Google_%22G%22_Logo.svg" className="w-4 h-4" /> Connect Drive
-                            </button>
-                        )}
-                        <p className="text-[9px] text-slate-500 mt-2 text-center">Saves to 'arcane_codex_cloud.json' in your Drive.</p>
                     </div>
 
                     <div className="grid grid-cols-2 gap-3">
