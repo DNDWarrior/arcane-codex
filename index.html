@@ -11,7 +11,7 @@
     
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Arcane Codex v7.4 (Restored)</title>
+    <title>Arcane Codex v7.5 (Cloud Restored)</title>
     
     <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
@@ -560,7 +560,6 @@
                          performCast(spell, pInst, newActive, true);
                          notify(newActive ? "Ritual Active" : "Ritual Ended", "neutral");
                      } else {
-                         // First Perform: Create Entry as Active
                          updateProfile({ prepared: [...cur.prepared, { spellId: spell.id, uuid: Date.now(), used: false, isActive: true }] });
                          notify("Ritual Active", "neutral");
                      }
@@ -844,6 +843,33 @@
                         </div>
                     </div>
 
+                    <div className={`bg-slate-800 p-3 rounded-lg border ${isPro ? 'border-slate-700' : 'border-amber-500/50'} mb-4 relative overflow-hidden min-h-[220px] flex flex-col justify-center`}>
+                        {!isPro && (
+                            <div className="absolute inset-0 bg-slate-900/80 backdrop-blur-[2px] flex flex-col items-center justify-center z-10 p-4 text-center">
+                                <h3 className="text-amber-400 font-bold text-sm mb-2">🔒 Pro Feature</h3>
+                                <p className="text-gray-400 text-xs mb-3">Support the dev to unlock Cloud Sync & backup your wizards safely.</p>
+                                <div className="flex gap-2 w-full">
+                                    <input type="text" placeholder="Enter Code" className="bg-black/50 border border-slate-600 rounded px-2 text-white text-xs flex-1 outline-none" value={promoCode} onChange={e=>setPromoCode(e.target.value)} />
+                                    <button onClick={handleUnlock} className="bg-amber-600 hover:bg-amber-500 text-white text-xs font-bold px-3 py-2 rounded">Unlock</button>
+                                </div>
+                                <a href="https://ko-fi.com/J3J81P2MNC" target="_blank" className="text-[10px] text-sky-400 underline mt-2">Get a code ($5)</a>
+                            </div>
+                        )}
+                        
+                        <h2 className="text-white font-bold mb-2 text-xs uppercase tracking-wide text-sky-400">Cloud Sync (Google Drive)</h2>
+                        {isSignedIn ? (
+                            <div className="grid grid-cols-2 gap-2">
+                                <button onClick={syncToCloud} className="bg-emerald-700 hover:bg-emerald-600 text-white text-xs font-bold py-2 rounded flex flex-col items-center"><span className="text-lg">☁️⬆️</span><span>Save to Cloud</span></button>
+                                <button onClick={loadFromCloud} className="bg-sky-700 hover:bg-sky-600 text-white text-xs font-bold py-2 rounded flex flex-col items-center"><span className="text-lg">☁️⬇️</span><span>Load from Cloud</span></button>
+                            </div>
+                        ) : (
+                            <button onClick={handleAuth} className="w-full bg-white text-slate-900 font-bold py-2 rounded flex items-center justify-center gap-2 hover:bg-gray-200">
+                                <img src="https://upload.wikimedia.org/wikipedia/commons/5/53/Google_%22G%22_Logo.svg" className="w-4 h-4" /> Connect Drive
+                            </button>
+                        )}
+                        <p className="text-[9px] text-slate-500 mt-2 text-center">Saves to 'arcane_codex_cloud.json' in your Drive.</p>
+                    </div>
+
                     <div className="grid grid-cols-2 gap-3">
                         <button onClick={handleExport} className="bg-slate-700 border border-slate-600 p-3 rounded flex flex-col items-center hover:bg-slate-600 transition"><span className="text-xl mb-1">💾</span><span className="text-xs font-bold text-slate-300">Backup Data</span></button>
                         <button onClick={handleImport} className="bg-slate-700 border border-slate-600 p-3 rounded flex flex-col items-center hover:bg-slate-600 transition"><span className="text-xl mb-1">📂</span><span className="text-xs font-bold text-slate-300">Restore Data</span></button>
@@ -879,21 +905,7 @@
                                     const full = count >= (baseMax + bonusMax + currMax);
                                     
                                     const isSpecial = s.traditions.includes("Ritual") || s.traditions.includes("Focus");
-                                    
-                                    const isCurriculumSpell = (cur.curriculumSpells||[]).includes(s.id);
-                                    
-                                    return (
-                                        <SpellCard
-                                            key={s.id}
-                                            spell={s}
-                                            actionLabel={(!isSpecial && full) ? "Slots Full" : "Prepare"}
-                                            disabled={!isSpecial && full}
-                                            actionType="prepare"
-                                            onAction={() => togglePrep(s)}
-                                            isCurriculum={isCurriculumSpell}
-                                            onToggleCurriculum={() => toggleCurriculumSpell(s.id)}
-                                        />
-                                    );
+                                    return <SpellCard key={s.id} spell={s} actionLabel={(!isSpecial && full) ? "Slots Full" : "Prepare"} disabled={!isSpecial && full} actionType="prepare" onAction={() => togglePrep(s)} />;
                                 })}
                                 {cur.spells.length === 0 && <div className="text-center text-gray-600 text-xs mt-10">Go to Grimoire to learn spells.</div>}
                             </div>
