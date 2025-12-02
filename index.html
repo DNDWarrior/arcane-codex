@@ -11,7 +11,7 @@
     
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Arcane Codex v7.1 (Grandmaster)</title>
+    <title>Arcane Codex v7.4 (Restored)</title>
     
     <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
@@ -419,11 +419,19 @@
                 });
             };
 
-            const adjustCurriculumSlots = (lvl, delta) => {
-                const currentMax = cur.curriculumSlots?.[lvl] || 0;
-                const newMax = Math.max(0, currentMax + delta);
+            const adjustBonusSlots = (lvl, delta) => {
+                const current = cur.bonusSlots?.[lvl] || 0;
+                const newVal = Math.max(0, current + delta);
                 updateProfile({
-                    curriculumSlots: { ...cur.curriculumSlots, [lvl]: newMax }
+                    bonusSlots: { ...cur.bonusSlots, [lvl]: newVal }
+                });
+            };
+
+            const adjustCurriculumSlots = (lvl, delta) => {
+                const current = cur.curriculumSlots?.[lvl] || 0;
+                const newVal = Math.max(0, current + delta);
+                updateProfile({
+                    curriculumSlots: { ...cur.curriculumSlots, [lvl]: newVal }
                 });
             };
 
@@ -478,7 +486,7 @@
                 const baseMax = cur.maxSlots[spell.level] || 0;
                 const bonusMax = cur.bonusSlots?.[spell.level] || 0;
                 const currMax = cur.curriculumSlots?.[spell.level] || 0;
-                const totalLimit = baseMax + bonusMax + currMax; 
+                const limit = baseMax + bonusMax + currMax; 
                 
                 const count = cur.prepared.filter(p => {
                     const s = dbSpells.find(x => x.id === p.spellId);
@@ -487,7 +495,7 @@
                 
                 const isSpecial = spell.traditions.includes("Ritual") || spell.traditions.includes("Focus");
 
-                if (isSpecial || count < totalLimit) {
+                if (isSpecial || count < limit) {
                     updateProfile({ prepared: [...cur.prepared, { spellId: spell.id, uuid: Date.now(), used: false, isActive: false }] });
                     notify(`Prepared ${spell.name}`);
                 } else notify(`Rank ${spell.level} Slots Full`, 'error');
@@ -552,6 +560,7 @@
                          performCast(spell, pInst, newActive, true);
                          notify(newActive ? "Ritual Active" : "Ritual Ended", "neutral");
                      } else {
+                         // First Perform: Create Entry as Active
                          updateProfile({ prepared: [...cur.prepared, { spellId: spell.id, uuid: Date.now(), used: false, isActive: true }] });
                          notify("Ritual Active", "neutral");
                      }
@@ -606,14 +615,9 @@
                         )}
 
                         {prepTab === 'spells' && [0,1,2,3,4,5,6,7,8,9].map(lvl => {
-                            // Sort Logic: Curriculum spells -> Then regular spells
                             const prep = cur.prepared.filter(p => {
                                 const s = dbSpells.find(s=>s.id===p.spellId);
                                 return s && s.level === lvl && !s.traditions.includes("Focus") && !s.traditions.includes("Ritual");
-                            }).sort((a, b) => {
-                                // If we are trying to prioritize filling curriculum slots first, we should sort curriculum spells to the end? 
-                                // Actually, let's stick to FIFO order but map them to slots intelligently below.
-                                return 0;
                             });
                             
                             const baseMax = cur.maxSlots[lvl] || 0;
@@ -623,54 +627,26 @@
                             
                             if (prep.length === 0 && totalMax === 0) return null;
                             
-                            // Slot Mapping Logic:
-                            // We have P spells prepared. We have B base, X bonus, C curriculum slots.
-                            // Spells marked as [C] (Curriculum) PREFER C slots.
-                            // Spells NOT marked as [C] PREFER B or X slots.
-                            
-                            const curriculumSpells = prep.filter(p => (cur.curriculumSpells||[]).includes(p.spellId));
-                            const standardSpells = prep.filter(p => !(cur.curriculumSpells||[]).includes(p.spellId));
-                            
-                            // Rebuild display list:
-                            // 1. Standard slots filled by standard spells
-                            // 2. Bonus slots filled by remaining standard spells
-                            // 3. Curriculum slots filled by curriculum spells
-                            
-                            // Simplified Visual Model: Just list them all, but style the slots.
-                            // We will map indices to slot types.
-                            // 0 -> baseMax-1: BASE
-                            // baseMax -> baseMax+bonusMax-1: BONUS
-                            // baseMax+bonusMax -> totalMax-1: CURRICULUM
-                            
-                            // But we want Curriculum Spells to visually inhabit the Curriculum Slots if possible.
-                            // So we create a visual array of "Slots"
-                            
+                            // Slot Mapping Logic
                             let slots = [];
-                            // Add Base Slots
                             for(let i=0; i<baseMax; i++) slots.push({type: 'base', content: null});
-                            // Add Bonus Slots
                             for(let i=0; i<bonusMax; i++) slots.push({type: 'bonus', content: null});
-                            // Add Curriculum Slots
                             for(let i=0; i<currMax; i++) slots.push({type: 'curriculum', content: null});
                             
-                            // Now fill them
-                            // First, place Curriculum Spells into Curriculum Slots (from back to front of avail C-slots)
+                            let curriculumSpells = prep.filter(p => (cur.curriculumSpells||[]).includes(p.spellId));
+                            let standardSpells = prep.filter(p => !(cur.curriculumSpells||[]).includes(p.spellId));
+                            
                             let cSpells = [...curriculumSpells];
                             let sSpells = [...standardSpells];
                             
-                            // Try to put cSpells into 'curriculum' slots first
+                            // Fill Curriculum slots first
                             for(let i=0; i<slots.length; i++) {
-                                if(slots[i].type === 'curriculum' && cSpells.length > 0) {
-                                    slots[i].content = cSpells.shift();
-                                }
+                                if(slots[i].type === 'curriculum' && cSpells.length > 0) slots[i].content = cSpells.shift();
                             }
                             
-                            // Fill remaining empty slots from top down with whatever is left (sSpells + remaining cSpells)
                             let remaining = [...sSpells, ...cSpells];
                             for(let i=0; i<slots.length; i++) {
-                                if(!slots[i].content && remaining.length > 0) {
-                                    slots[i].content = remaining.shift();
-                                }
+                                if(!slots[i].content && remaining.length > 0) slots[i].content = remaining.shift();
                             }
 
                             return (
@@ -681,7 +657,7 @@
                                     </div>
                                     <div className="flex flex-wrap gap-2">
                                         {slots.map((slot, i) => {
-                                            let style = "bg-slate-900/30 border-slate-700 border-dashed"; // Empty
+                                            let style = "bg-slate-900/30 border-slate-700 border-dashed";
                                             if (slot.type === 'bonus') style = "bg-cyan-900/10 border-cyan-600/30 border-dashed";
                                             if (slot.type === 'curriculum') style = "bg-amber-900/10 border-amber-600/30 border-dashed";
                                             
@@ -704,7 +680,6 @@
                                                     </div>
                                                 );
                                             } else {
-                                                // Empty Slot Render
                                                 return <div key={`empty-${i}`} className={`flex-1 min-w-[45%] h-8 rounded border relative ${style}`}>
                                                     {slot.type === 'bonus' && <span className="absolute inset-0 flex items-center justify-center text-[8px] text-cyan-700 font-bold opacity-50">BONUS</span>}
                                                     {slot.type === 'curriculum' && <span className="absolute inset-0 flex items-center justify-center text-[8px] text-amber-700 font-bold opacity-50">SCHOOL</span>}
@@ -771,7 +746,7 @@
                                     <option key={i+1} value={i+1}>Level {i+1} (Max Rank {Math.ceil((i+1)/2)})</option>
                                 ))}
                              </select>
-                             <button onClick={()=> {const l=parseInt(document.getElementById('lvl').value); updateProfile({maxSlots:WIZARD_TABLE[l], level:l}); notify(`Level ${l} Applied`)}} className="bg-sky-700 text-white text-xs font-bold px-3 py-1 rounded">Apply</button>
+                             <button onClick={()=> {const l=parseInt(document.getElementById('lvl').value); applyTemplate(l); }} className="bg-sky-700 text-white text-xs font-bold px-3 py-1 rounded">Apply</button>
                          </div>
 
                          {/* SLOT MANAGER ACCORDION */}
@@ -809,33 +784,17 @@
                          </details>
 
                          <h2 className="text-sky-400 font-bold mb-2 text-xs uppercase tracking-wider border-b border-slate-700 pb-1">My Spellbook</h2>
-                         {knownIds.length === 0 ? <div className="text-gray-600 text-xs italic p-2">Empty. Learn spells below.</div> : dbSpells.filter(s => knownIds.includes(s.id)).map(s => {
-                             // Strict Count check for buttons
-                             const count = cur.prepared.filter(p => {
-                                 const x = dbSpells.find(ref => ref.id === p.spellId);
-                                 return x && x.level === s.level && !x.traditions.includes("Focus") && !x.traditions.includes("Ritual");
-                             }).length;
-                             
-                             const baseMax = cur.maxSlots[s.level] || 0;
-                             const bonusMax = cur.bonusSlots?.[s.level] || 0;
-                             const currMax = cur.curriculumSlots?.[s.level] || 0;
-                             const full = count >= (baseMax + bonusMax + currMax);
-
-                             const isSpecial = s.traditions.includes("Ritual") || s.traditions.includes("Focus");
-                             const isCurriculumSpell = (cur.curriculumSpells||[]).includes(s.id);
-                             
-                             return (
-                                 <SpellCard
-                                     key={s.id}
-                                     spell={s}
-                                     actionLabel="Remove"
-                                     actionType="remove"
-                                     onAction={() => updateProfile({spells: cur.spells.filter(id => id !== s.id)})}
-                                     isCurriculum={isCurriculumSpell}
-                                     onToggleCurriculum={() => toggleCurriculumSpell(s.id)}
-                                 />
-                             );
-                        })}
+                         {knownIds.length === 0 ? <div className="text-gray-600 text-xs italic p-2">Empty. Learn spells below.</div> : dbSpells.filter(s => knownIds.includes(s.id)).map(s => (
+                             <SpellCard
+                                 key={s.id}
+                                 spell={s}
+                                 actionLabel="Remove"
+                                 actionType="remove"
+                                 onAction={() => updateProfile({spells: cur.spells.filter(id => id !== s.id)})}
+                                 isCurriculum={(cur.curriculumSpells||[]).includes(s.id)}
+                                 onToggleCurriculum={() => toggleCurriculumSpell(s.id)}
+                             />
+                        ))}
                          
                          <div className="mt-8 border-b border-slate-700 pb-1 flex justify-between items-end mb-2"><h2 className="text-emerald-400 font-bold text-xs uppercase tracking-wider">The Archives</h2></div>
                          <input type="text" value={archiveSearch} onChange={e=>setArchiveSearch(e.target.value)} placeholder="Search Archive..." className="w-full bg-slate-900 text-white p-2 rounded border border-slate-700 text-sm mb-4 focus:outline-none focus:border-emerald-500" />
@@ -920,7 +879,21 @@
                                     const full = count >= (baseMax + bonusMax + currMax);
                                     
                                     const isSpecial = s.traditions.includes("Ritual") || s.traditions.includes("Focus");
-                                    return <SpellCard key={s.id} spell={s} actionLabel={(!isSpecial && full) ? "Slots Full" : "Prepare"} disabled={!isSpecial && full} actionType="prepare" onAction={() => togglePrep(s)} />;
+                                    
+                                    const isCurriculumSpell = (cur.curriculumSpells||[]).includes(s.id);
+                                    
+                                    return (
+                                        <SpellCard
+                                            key={s.id}
+                                            spell={s}
+                                            actionLabel={(!isSpecial && full) ? "Slots Full" : "Prepare"}
+                                            disabled={!isSpecial && full}
+                                            actionType="prepare"
+                                            onAction={() => togglePrep(s)}
+                                            isCurriculum={isCurriculumSpell}
+                                            onToggleCurriculum={() => toggleCurriculumSpell(s.id)}
+                                        />
+                                    );
                                 })}
                                 {cur.spells.length === 0 && <div className="text-center text-gray-600 text-xs mt-10">Go to Grimoire to learn spells.</div>}
                             </div>
