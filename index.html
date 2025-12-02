@@ -11,7 +11,7 @@
     
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Arcane Codex v7.5 (Cloud Restored)</title>
+    <title>Arcane Codex v7.6 (Spellbook Refactor)</title>
     
     <script src="https://unpkg.com/react@18/umd/react.development.js"></script>
     <script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
@@ -782,19 +782,6 @@
                              </div>
                          </details>
 
-                         <h2 className="text-sky-400 font-bold mb-2 text-xs uppercase tracking-wider border-b border-slate-700 pb-1">My Spellbook</h2>
-                         {knownIds.length === 0 ? <div className="text-gray-600 text-xs italic p-2">Empty. Learn spells below.</div> : dbSpells.filter(s => knownIds.includes(s.id)).map(s => (
-                             <SpellCard
-                                 key={s.id}
-                                 spell={s}
-                                 actionLabel="Remove"
-                                 actionType="remove"
-                                 onAction={() => updateProfile({spells: cur.spells.filter(id => id !== s.id)})}
-                                 isCurriculum={(cur.curriculumSpells||[]).includes(s.id)}
-                                 onToggleCurriculum={() => toggleCurriculumSpell(s.id)}
-                             />
-                        ))}
-                         
                          <div className="mt-8 border-b border-slate-700 pb-1 flex justify-between items-end mb-2"><h2 className="text-emerald-400 font-bold text-xs uppercase tracking-wider">The Archives</h2></div>
                          <input type="text" value={archiveSearch} onChange={e=>setArchiveSearch(e.target.value)} placeholder="Search Archive..." className="w-full bg-slate-900 text-white p-2 rounded border border-slate-700 text-sm mb-4 focus:outline-none focus:border-emerald-500" />
                          {traditions.map(trad => {
@@ -847,12 +834,12 @@
                         {!isPro && (
                             <div className="absolute inset-0 bg-slate-900/80 backdrop-blur-[2px] flex flex-col items-center justify-center z-10 p-4 text-center">
                                 <h3 className="text-amber-400 font-bold text-sm mb-2">🔒 Pro Feature</h3>
-                                <p className="text-gray-400 text-xs mb-3">Support the dev to unlock Google Cloud Sync to save your wizards safely.</p>
+                                <p className="text-gray-400 text-xs mb-3">Support the dev to unlock Cloud Sync & backup your wizards safely.</p>
                                 <div className="flex gap-2 w-full">
                                     <input type="text" placeholder="Enter Code" className="bg-black/50 border border-slate-600 rounded px-2 text-white text-xs flex-1 outline-none" value={promoCode} onChange={e=>setPromoCode(e.target.value)} />
                                     <button onClick={handleUnlock} className="bg-amber-600 hover:bg-amber-500 text-white text-xs font-bold px-3 py-2 rounded">Unlock</button>
                                 </div>
-                                <a href="https://ko-fi.com/J3J81P2MNC" target="_blank" className="text-[10px] text-sky-400 underline mt-2">Unlock Premium ($5)</a>
+                                <a href="https://ko-fi.com/J3J81P2MNC" target="_blank" className="text-[10px] text-sky-400 underline mt-2">Get a code ($5)</a>
                             </div>
                         )}
                         
@@ -905,7 +892,21 @@
                                     const full = count >= (baseMax + bonusMax + currMax);
                                     
                                     const isSpecial = s.traditions.includes("Ritual") || s.traditions.includes("Focus");
-                                    return <SpellCard key={s.id} spell={s} actionLabel={(!isSpecial && full) ? "Slots Full" : "Prepare"} disabled={!isSpecial && full} actionType="prepare" onAction={() => togglePrep(s)} />;
+                                    
+                                    const isCurriculumSpell = (cur.curriculumSpells||[]).includes(s.id);
+                                    
+                                    return (
+                                        <SpellCard
+                                            key={s.id}
+                                            spell={s}
+                                            actionLabel={(!isSpecial && full) ? "Slots Full" : "Prepare"}
+                                            disabled={!isSpecial && full}
+                                            actionType="prepare"
+                                            onAction={() => togglePrep(s)}
+                                            isCurriculum={isCurriculumSpell}
+                                            onToggleCurriculum={() => toggleCurriculumSpell(s.id)}
+                                        />
+                                    );
                                 })}
                                 {cur.spells.length === 0 && <div className="text-center text-gray-600 text-xs mt-10">Go to Grimoire to learn spells.</div>}
                             </div>
